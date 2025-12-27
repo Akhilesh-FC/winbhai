@@ -116,7 +116,7 @@
         countdown--;
         setTimeout(updateCountdown, 1000); // Repeat every second
       } else {
-        window.location.href = "https://globalbet24.live/"; // Redirect to home page after countdown
+        window.location.href = "https://winbhai.in/"; // Redirect to home page after countdown
       }
     }
     

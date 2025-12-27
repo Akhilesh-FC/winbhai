@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\ThirdpartyApiController;
 use App\Http\Controllers\Api\jiliApiController;
 use App\Http\Controllers\Api\BrandController;
 use App\Http\Controllers\Api\CategoryLanguageController;
+use App\Http\Controllers\Api\CommissionController;
 
 
 Route::get('/admin_notifications', [CategoryLanguageController::class, 'admin_notifications']);
@@ -48,11 +49,26 @@ Route::get('/brand-details/{brand_id}', [BrandController::class, 'getBrandDetail
 
 Route::post('/betSummaryProfit_loss', [PublicApiController::class, 'betSummaryProfit_loss']);
 
+Route::post('/campaign_click', [PublicApiController::class,  'trackClick']);
+
 Route::post('/campaign_create', [PublicApiController::class, 'campaign_create']);
 Route::post('/campaign_list', [PublicApiController::class, 'campaign_list']);
 Route::post('/campaign_summary', [PublicApiController::class, 'campaign_summary']);
 Route::post('/campaign_analytics', [PublicApiController::class, 'campaign_analytics']);
+//Route::get('/campaign-summary/download', [PublicApiController::class, 'downloadCampaignSummary']);
+Route::get(
+    '/campaign-analytics/download',
+    [PublicApiController::class, 'downloadCampaignSummary']
+);
+
 Route::post('/campaign_commission_summary', [PublicApiController::class, 'campaign_commission_summary']);
+//Route::get('/calculateAndCreditAllCampaignsCommission',[PublicApiController::class, 'calculateAndCreditAllCampaignsCommission']);
+Route::get('/run-all-campaign-commission',
+    [CommissionController::class, 'runAllCampaignCommission']
+);
+
+
+
 
 Route::post('/pending-bets', [PublicApiController::class, 'getPendingBets']);
 Route::post('/betHistory_winbhai', [PublicApiController::class, 'betHistory_winbhai']);
@@ -72,8 +88,11 @@ Route::controller(jiliApiController::class)->group(function () {
     // Example: /api/game-history-filter?user_id=34&game_id=3
     Route::get('/game-history-filter', 'filterGameHistory');
     // 2️⃣ USER FULL GAME HISTORY
-// Example: /api/game-history/34
-Route::get('/game-history/{user_id}','userGameHistory');
+    // Example: /api/game-history/34
+    Route::get('/game-history/{user_id}','userGameHistory');
+    
+    Route::post('/game-callback',  'gameCallback');
+
 });
 
 
@@ -81,13 +100,10 @@ Route::get('/game-history/{user_id}','userGameHistory');
 
 Route::controller(ThirdpartyApiController::class)->group(function () {
    Route::get('/test-api', 'hitApi'); 
-   
     // Callback API (game result aayega yaha)
     Route::post('/callback', [ThirdpartyApiController::class, 'handleCallback']);
-    
     // GGR Billing Check
     Route::get('/billing/{token}', [ThirdpartyApiController::class, 'checkBilling']);
-  
 });
 
 Route::controller(ChikangameController::class)->group(function () {
@@ -97,6 +113,8 @@ Route::controller(ChikangameController::class)->group(function () {
     Route::post('/cashout', 'cashout');      // POST /bet/cashout
     Route::get('/multiplier', 'multiplier');           // GET /multiplier
     Route::get('/getGameRules', 'getGameRules'); // GET /multiplier/getGameRules
+    
+    Route::get('/chicken/auto-loss',  'autoLossChicken30Sec');
 });
 
 
@@ -108,6 +126,7 @@ Route::post('/bappa_venture',[PayinController::class,'bappa_venture']);
 Route::post('/decode_data',[PayinController::class,'decode_data']);
 Route::post('/payzaaar-callback', [PayinController::class, 'payzaaarCallback']);
 Route::get('/check-payzaar-payment', [PayinController::class, 'checkPayzaaarPayment']);
+Route::get('/checkPayment', [PayinController::class, 'checkPayment']);
 
 Route::post('/usdt_payin',[PayinController::class,'usdt_payin']);
 Route::get('/show_qr',[PayinController::class,'qr_view']);

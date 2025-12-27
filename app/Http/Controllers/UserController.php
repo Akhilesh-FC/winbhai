@@ -167,64 +167,147 @@ class UserController extends Controller
         ]);
     }
     
+    
+    
     public function campaignList(Request $request)
-    {
-        if ($request->session()->has('id')) {
-    
-            $query = DB::table('campaigns')
-                ->select('id', 'user_id', 'campaign_name', 'unique_code', 'referral_link', 'created_at')
-                ->orderBy('id', 'DESC');
-    
-            // 🔍 Search filter
-            if ($request->filled('search')) {
-                $search = $request->input('search');
-                $query->where(function ($q) use ($search) {
-                    $q->where('campaign_name', 'LIKE', "%{$search}%")
-                      ->orWhere('unique_code', 'LIKE', "%{$search}%")
-                      ->orWhere('referral_link', 'LIKE', "%{$search}%")
-                      ->orWhere('user_id', 'LIKE', "%{$search}%");
-                });
-            }
-    
-            $campaigns = $query->paginate(5);
-    
-            // Data Processing
-            foreach ($campaigns as $campaign) {
-    
-                // ⏺ Total players (users registered by this referral code)
-                $playerCount = DB::table('users')
-                    ->where('referral_code', $campaign->unique_code)
-                    ->count();
-    
-                $campaign->players = $playerCount;
-    
-                // ⏺ Affiliation Percentage
-                if ($playerCount <= 2) {
-                    $campaign->affiliation_percentage = "10%";
-                } elseif ($playerCount <= 10) {
-                    $campaign->affiliation_percentage = "20%";
-                } else {
-                    $campaign->affiliation_percentage = "30%";
-                }
-    
-               $createdBy = DB::table('users')
+{
+    if (!$request->session()->has('id')) {
+        return redirect()->route('login');
+    }
+
+    $query = DB::table('campaigns')
+        ->select(
+            'id',
+            'user_id',
+            'campaign_name',
+            'unique_code',
+            'referral_link',
+            'created_at',
+            'real_revenue',
+            'fake_revenue'
+        )
+        ->orderBy('id', 'DESC');
+
+    // 🔍 Search
+    if ($request->filled('search')) {
+        $search = $request->search;
+        $query->where(function ($q) use ($search) {
+            $q->where('campaign_name', 'LIKE', "%{$search}%")
+              ->orWhere('unique_code', 'LIKE', "%{$search}%")
+              ->orWhere('referral_link', 'LIKE', "%{$search}%")
+              ->orWhere('user_id', 'LIKE', "%{$search}%");
+        });
+    }
+
+    $campaigns = $query->paginate(5);
+
+    foreach ($campaigns as $campaign) {
+
+        // 👥 Players count
+        $campaign->players = DB::table('users')
+            ->where('referral_code', $campaign->unique_code)
+            ->count();
+
+        // 👤 Created by
+        $createdBy = DB::table('users')
             ->where('id', $campaign->user_id)
             ->select('username', 'mobile')
             ->first();
-        
+
         $campaign->created_by = $createdBy->username ?? 'Unknown';
         $campaign->created_by_mobile = $createdBy->mobile ?? 'N/A';
 
-            }
-    
-            $campaigns->appends($request->only('search'));
-    
-            return view('campaigns.index', compact('campaigns'));
-    
-        } else {
-            return redirect()->route('login');
-        }
+        // 💰 Total Revenue
+        $campaign->total_revenue =
+            ($campaign->real_revenue ?? 0) + ($campaign->fake_revenue ?? 0);
     }
+
+    $campaigns->appends($request->only('search'));
+
+    return view('campaigns.index', compact('campaigns'));
+}
+
+
+public function updateUserCampaignRevenue(Request $request)
+{
+    $request->validate([
+        'user_id'      => 'required|integer',
+        'real_revenue' => 'required|numeric|min:0',
+        'fake_revenue' => 'required|numeric|min:0',
+    ]);
+
+    DB::table('campaigns')
+        ->where('user_id', $request->user_id)
+        ->update([
+            'real_revenue' => $request->real_revenue,
+            'fake_revenue' => $request->fake_revenue,
+            'updated_at'   => now()
+        ]);
+
+    return redirect()->back()->with('success', 'Revenue updated successfully');
+}
+
+
+
+
+    // public function campaignList(Request $request)
+    // {
+    //     if ($request->session()->has('id')) {
+    
+    //         $query = DB::table('campaigns')
+    //             ->select('id', 'user_id', 'campaign_name', 'unique_code', 'referral_link', 'created_at')
+    //             ->orderBy('id', 'DESC');
+    
+    //         // 🔍 Search filter
+    //         if ($request->filled('search')) {
+    //             $search = $request->input('search');
+    //             $query->where(function ($q) use ($search) {
+    //                 $q->where('campaign_name', 'LIKE', "%{$search}%")
+    //                   ->orWhere('unique_code', 'LIKE', "%{$search}%")
+    //                   ->orWhere('referral_link', 'LIKE', "%{$search}%")
+    //                   ->orWhere('user_id', 'LIKE', "%{$search}%");
+    //             });
+    //         }
+    
+    //         $campaigns = $query->paginate(5);
+    
+    //         // Data Processing
+    //         foreach ($campaigns as $campaign) {
+    
+    //             // ⏺ Total players (users registered by this referral code)
+    //             $playerCount = DB::table('users')
+    //                 ->where('referral_code', $campaign->unique_code)
+    //                 ->count();
+    
+    //             $campaign->players = $playerCount;
+    
+    //             // ⏺ Affiliation Percentage
+    //             if ($playerCount <= 2) {
+    //                 $campaign->affiliation_percentage = "10%";
+    //             } elseif ($playerCount <= 10) {
+    //                 $campaign->affiliation_percentage = "20%";
+    //             } else {
+    //                 $campaign->affiliation_percentage = "30%";
+    //             }
+    
+    //           $createdBy = DB::table('users')
+    //         ->where('id', $campaign->user_id)
+    //         ->select('username', 'mobile')
+    //         ->first();
+        
+    //     $campaign->created_by = $createdBy->username ?? 'Unknown';
+    //     $campaign->created_by_mobile = $createdBy->mobile ?? 'N/A';
+
+    //         }
+    
+    //         $campaigns->appends($request->only('search'));
+    
+    //         return view('campaigns.index', compact('campaigns'));
+    
+    //     } else {
+    //         return redirect()->route('login');
+    //     }
+    // }
 
     public function demoUser(Request $request)
     {

@@ -26,6 +26,12 @@ use App\Models\CustomerService;
 use Illuminate\Support\Facades\Log;
 use App\Helper\jilli;
 use URL;
+use Illuminate\Support\Facades\Schema;
+// use Barryvdh\DomPDF\Facade\Pdf;
+use Mpdf\Mpdf;
+
+
+
 
 class PublicApiController extends Controller
 {
@@ -443,10 +449,10 @@ class PublicApiController extends Controller
         // -------------------------------------------------------------
         // Minimum / Maximum limit check
         // -------------------------------------------------------------
-        if ($amount < 200 || $amount > 25000) {
+        if ($amount < 100 || $amount > 25000) {
             return response()->json([
                 'status' => 400,
-                'message' => 'Minimum withdraw 200 and maximum 25000 allowed.'
+                'message' => 'Minimum withdraw 100 and maximum 25000 allowed.'
             ], 400);
         }
     
@@ -620,7 +626,7 @@ class PublicApiController extends Controller
             ], 500);
         }
     }
-
+    
     public function betSummaryProfit_loss(Request $request)
     {
     $validator = Validator::make($request->all(), [
@@ -638,95 +644,123 @@ class PublicApiController extends Controller
 
     $userId = $request->user_id;
     $from = $request->from_date ? $request->from_date . ' 00:00:00' : null;
-    $to = $request->to_date ? $request->to_date . ' 23:59:59' : null;
+    $to   = $request->to_date   ? $request->to_date   . ' 23:59:59' : null;
 
-    // 🟢 1️⃣ WINGO (bets table)
-    $betsQuery = DB::table('bets')
-        ->where('userid', $userId);
-
-    if ($from && $to) {
-        $betsQuery->whereBetween('created_at', [$from, $to]);
-    }
+    /* =======================
+       🟢 1️⃣ WINGO
+    ========================*/
+    $betsQuery = DB::table('bets')->where('userid', $userId);
+    if ($from && $to) $betsQuery->whereBetween('created_at', [$from, $to]);
 
     $bets = $betsQuery
         ->selectRaw('COALESCE(SUM(trade_amount),0) as total_bet, COALESCE(SUM(win_amount),0) as total_win')
         ->first();
 
-    $bets_profit = max(($bets->total_win ?? 0) - ($bets->total_bet ?? 0), 0);
-    $bets_loss = max(($bets->total_bet ?? 0) - ($bets->total_win ?? 0), 0);
-
-    // 🟢 2️⃣ AVIATOR (aviator_bet table)
-    $aviatorQuery = DB::table('aviator_bet')
-        ->where('uid', $userId);
-
-    if ($from && $to) {
-        $aviatorQuery->whereBetween('datetime', [$from, $to]);
-    }
+    /* =======================
+       🟢 2️⃣ AVIATOR
+    ========================*/
+    $aviatorQuery = DB::table('aviator_bet')->where('uid', $userId);
+    if ($from && $to) $aviatorQuery->whereBetween('datetime', [$from, $to]);
 
     $aviator = $aviatorQuery
         ->selectRaw('COALESCE(SUM(amount),0) as total_bet, COALESCE(SUM(win),0) as total_win')
         ->first();
 
-    $aviator_profit = max(($aviator->total_win ?? 0) - ($aviator->total_bet ?? 0), 0);
-    $aviator_loss = max(($aviator->total_bet ?? 0) - ($aviator->total_win ?? 0), 0);
-
-    // 🟢 3️⃣ CHICKEN ROAD (chicken_bets table)
-    $chickenQuery = DB::table('chicken_bets')
-        ->where('user_id', $userId);
-
-    if ($from && $to) {
-        $chickenQuery->whereBetween('created_at', [$from, $to]);
-    }
+    /* =======================
+       🟢 3️⃣ CHICKEN ROAD
+    ========================*/
+    $chickenQuery = DB::table('chicken_bets')->where('user_id', $userId);
+    if ($from && $to) $chickenQuery->whereBetween('created_at', [$from, $to]);
 
     $chicken = $chickenQuery
         ->selectRaw('COALESCE(SUM(amount),0) as total_bet, COALESCE(SUM(win_number),0) as total_win')
         ->first();
 
-    $chicken_profit = max(($chicken->total_win ?? 0) - ($chicken->total_bet ?? 0), 0);
-    $chicken_loss = max(($chicken->total_bet ?? 0) - ($chicken->total_win ?? 0), 0);
+    /* =======================
+       🟢 4️⃣ OTHER GAMES
+    ========================*/
+    $gameHistoryQuery = DB::table('game_history')->where('user_id', $userId);
+    if ($from && $to) $gameHistoryQuery->whereBetween('created_at', [$from, $to]);
 
-    // 🧮 GRAND TOTALS
-    $grand_total_bet = ($bets->total_bet ?? 0) + ($aviator->total_bet ?? 0) + ($chicken->total_bet ?? 0);
-    $grand_total_win = ($bets->total_win ?? 0) + ($aviator->total_win ?? 0) + ($chicken->total_win ?? 0);
-    $grand_profit = max($grand_total_win - $grand_total_bet, 0);
-    $grand_loss = max($grand_total_bet - $grand_total_win, 0);
+    $otherGames = $gameHistoryQuery
+        ->select(
+            'game_name',
+            DB::raw('SUM(bet_amount) as total_bet'),
+            DB::raw('SUM(win_amount) as total_win')
+        )
+        ->groupBy('game_name')
+        ->get();
 
-    // ✅ Final JSON Response
+    /* =======================
+       🧩 COMBINED GAME HISTORY
+    ========================*/
+    $gameHistorySummary = [
+
+        [
+            'game_name' => 'Wingo',
+            'total_bet' => (float) $bets->total_bet,
+            'total_win' => (float) $bets->total_win,
+            'profit'    => max($bets->total_win - $bets->total_bet, 0),
+            'loss'      => max($bets->total_bet - $bets->total_win, 0),
+        ],
+        [
+            'game_name' => 'Aviator',
+            'total_bet' => (float) $aviator->total_bet,
+            'total_win' => (float) $aviator->total_win,
+            'profit'    => max($aviator->total_win - $aviator->total_bet, 0),
+            'loss'      => max($aviator->total_bet - $aviator->total_win, 0),
+        ],
+        [
+            'game_name' => 'Chicken Road',
+            'total_bet' => (float) $chicken->total_bet,
+            'total_win' => (float) $chicken->total_win,
+            'profit'    => max($chicken->total_win - $chicken->total_bet, 0),
+            'loss'      => max($chicken->total_bet - $chicken->total_win, 0),
+        ],
+    ];
+
+    foreach ($otherGames as $game) {
+        $gameHistorySummary[] = [
+            'game_name' => $game->game_name,
+            'total_bet' => (float) $game->total_bet,
+            'total_win' => (float) $game->total_win,
+            'profit'    => max($game->total_win - $game->total_bet, 0),
+            'loss'      => max($game->total_bet - $game->total_win, 0),
+        ];
+    }
+
+    /* =======================
+       🧮 GRAND TOTAL
+    ========================*/
+    $grand_total_bet =
+        $bets->total_bet +
+        $aviator->total_bet +
+        $chicken->total_bet +
+        $otherGames->sum('total_bet');
+
+    $grand_total_win =
+        $bets->total_win +
+        $aviator->total_win +
+        $chicken->total_win +
+        $otherGames->sum('total_win');
+
     return response()->json([
-        'status' => 200,
+        'status'  => 200,
         'message' => 'Bet summary fetched successfully',
         'data' => [
-            'from_date' => $request->from_date ?? 'All time',
-            'to_date' => $request->to_date ?? 'All time',
-
-            'wingo' => [
-                'total_bet' => $bets->total_bet,
-                'total_win' => $bets->total_win,
-                'profit' => $bets_profit,
-                'loss' => $bets_loss,
-            ],
-            'aviator' => [
-                'total_bet' => $aviator->total_bet,
-                'total_win' => $aviator->total_win,
-                'profit' => $aviator_profit,
-                'loss' => $aviator_loss,
-            ],
-            'chicken' => [
-                'total_bet' => $chicken->total_bet,
-                'total_win' => $chicken->total_win,
-                'profit' => $chicken_profit,
-                'loss' => $chicken_loss,
-            ],
+            'from_date' => $request->from_date ?? 'All Time',
+            'to_date'   => $request->to_date   ?? 'All Time',
+            'game_history' => $gameHistorySummary,
             'grand_total' => [
                 'total_bet' => $grand_total_bet,
                 'total_win' => $grand_total_win,
-                'profit' => $grand_profit,
-                'loss' => $grand_loss,
+                'profit'    => max($grand_total_win - $grand_total_bet, 0),
+                'loss'      => max($grand_total_bet - $grand_total_win, 0),
             ]
-        ],
+        ]
     ]);
 }
-    
+
     public function campaign_create(Request $request)
     {
         $userId = $request->input('user_id');
@@ -837,8 +871,11 @@ class PublicApiController extends Controller
             ], 400);
         }
     
-        // ✅ Step 1: Get Campaign Details
+        /* =========================
+           1️⃣ Campaign Details
+        ========================= */
         $campaign = DB::table('campaigns')->where('id', $campaignId)->first();
+    
         if (!$campaign) {
             return response()->json([
                 'status' => false,
@@ -846,249 +883,348 @@ class PublicApiController extends Controller
             ], 404);
         }
     
-        $uniqueCode = $campaign->unique_code;
-    
-        // ✅ Step 2: Get All Users Registered Using This Campaign Code
-        $registeredUsers = DB::table('users')
-            ->where('referral_code', $uniqueCode)
+        /* =========================
+           2️⃣ Campaign Users
+        ========================= */
+        $users = DB::table('users')
+            ->where('campaign_id', $campaignId)
+            ->select('id')
             ->get();
     
-        $totalRegistrations = $registeredUsers->count();
-        $userIds = $registeredUsers->pluck('id')->toArray();
+        $userIds = $users->pluck('id')->toArray();
     
-        // ✅ Default values (initialize all to 0)
-        $firstDepositUsers = 0;
-        $numberDeposits = 0;
-        $totalDeposit = 0;
-        $totalWithdrawal = 0;
-        $totalCommission = 0;
-        $linkClicks = 0;
+        // Default values
+        $totalRegistrations  = count($userIds);
+        $firstDepositUsers   = 0;
+        $firstDepositAmount  = 0;
+        $numberDeposits      = 0;
+        $totalDeposit        = 0;
+        $totalWithdrawal     = 0;
+        $transactions        = 0;
+        $yourCommission      = 0;
     
-        // ✅ Step 3: If users exist, calculate details
         if (!empty($userIds)) {
-            // 🟩 First Deposit Users
-            $firstDepositUsers = DB::table('users')
-                ->whereIn('id', $userIds)
-                ->whereNotNull('first_recharge_amount')
-                ->where('first_recharge_amount', '>', 0)
+    
+            /* =========================
+               3️⃣ PAYINS (SUCCESS ONLY)
+            ========================= */
+            $payins = DB::table('payins')
+                ->select('user_id', 'cash', 'created_at')
+                ->whereIn('user_id', $userIds)
+                ->where('status', 2)
+                ->where('cash', '>', 0)
+                ->orderBy('created_at', 'asc')
+                ->get()
+                ->groupBy('user_id');
+    
+            foreach ($payins as $uid => $userPayins) {
+    
+                if ($userPayins->count() == 1) {
+                    $firstDepositUsers++;
+                    $firstDepositAmount += (float) $userPayins->first()->cash;
+                }
+    
+                $numberDeposits += $userPayins->count();
+                $totalDeposit   += $userPayins->sum('cash');
+            }
+    
+            /* =========================
+               4️⃣ ALL TRANSACTIONS
+            ========================= */
+            $transactions = DB::table('payins')
+                ->whereIn('user_id', $userIds)
                 ->count();
     
-            // 🟩 Total Deposits
-            $deposits = DB::table('payins')
-                ->whereIn('user_id', $userIds)
-                ->where('status', 1)
-                ->get();
-    
-            $numberDeposits = $deposits->count();
-            $totalDeposit = $deposits->sum('cash');
-    
-            // 🟩 Total Withdrawals (if table exists)
+            /* =========================
+               5️⃣ WITHDRAWALS
+            ========================= */
             if (Schema::hasTable('payouts')) {
-                $withdrawals = DB::table('payouts')
+                $totalWithdrawal = DB::table('payouts')
                     ->whereIn('user_id', $userIds)
                     ->where('status', 1)
-                    ->get();
-    
-                $totalWithdrawal = $withdrawals->sum('amount');
+                    ->sum('amount');
             }
     
-            // 🟩 Total Commission
-            $totalCommission = $registeredUsers->sum('commission');
+            /* =========================
+               6️⃣ COMMISSION (20%)
+            ========================= */
+            
+            //  $commissionPercent = DB::table('revenue')
+            // ->orderBy('id', 'desc')
+            // ->value('revenue') ?? 0;
+            $commissionPercent = (float) ($campaign->real_revenue ?? 0);
     
-            // 🟩 Link Clicks (if link_clicks table exists)
-            if (Schema::hasTable('link_clicks')) {
-                $linkClicks = DB::table('link_clicks')
-                    ->where('campaign_id', $campaignId)
-                    ->count();
-            }
+            //$commissionPercent = 15;
+            $netPL = 0;
+    
+            // WINGO / bets
+            $netPL += DB::table('bets')
+                ->whereIn('userid', $userIds)
+                ->sum(DB::raw('win_amount - trade_amount'));
+    
+            // AVIATOR
+            $netPL += DB::table('aviator_bet')
+                ->whereIn('uid', $userIds)
+                ->sum(DB::raw('win - amount'));
+    
+            // CHICKEN
+            $netPL += DB::table('chicken_bets')
+                ->whereIn('user_id', $userIds)
+                ->sum(DB::raw('win_amount - amount'));
+    
+            // THIRD PARTY / CALLBACK
+            $netPL += DB::table('game_history')
+                ->whereIn('user_id', $userIds)
+                ->sum(DB::raw('win_amount - bet_amount'));
+    
+            // if ($netPL < 0) {
+            //     // LOSS → +20% of loss
+            //     $yourCommission = abs($netPL) * ($commissionPercent / 100);
+            // } else {
+            //     // NO LOSS / WIN → -20% of deposit
+            //     $yourCommission = -($totalDeposit * ($commissionPercent / 100));
+            // }
+    
+            // $yourCommission = round($yourCommission, 2);
+            
+            
+//             if ($netPL < 0) {
+//     // LOSS → commission
+//     $yourCommission = abs($netPL) * ($commissionPercent / 100);
+
+// } elseif ($netPL == 0) {
+//     // NO BET / NO PLAY → NO COMMISSION
+//     $yourCommission = 0;
+
+// } else {
+//     // WIN → negative commission on deposit
+//     $yourCommission = -($totalDeposit * ($commissionPercent / 100));
+// }
+
+//$yourCommission = round($yourCommission, 2);
+
+
+
+/* =========================
+   6️⃣ COMMISSION (FROM commission_logs)
+========================= */
+
+$yourCommission = DB::table('commission_logs')
+    ->where('campaign_id', $campaignId)
+    ->sum('amount');   // or commission_amount (jo column hai)
+
+$yourCommission = round($yourCommission, 2);
+   
+            
         }
     
-        // ✅ Step 4: Final consistent response
+        /* =========================
+           LINK CLICKS
+        ========================= */
+        // $Link_Clicks = (int) ($campaign->click_count ?? 0);
+        $Link_Clicks = (int) floor(($campaign->click_count ?? 0) / 2);
+    
+    
+        /* =========================
+           FINAL RESPONSE
+        ========================= */
         return response()->json([
-            'status' => true,
+            'status'  => true,
             'message' => 'Campaign analytics fetched successfully',
             'data' => [
-                'Campaign_ID' => $campaignId,
-                'Campaign_Name' => $campaign->campaign_name,
-                'Unique_Code' => $uniqueCode,
-                'Registrations' => (int)$totalRegistrations,
-                'First_Deposits' => (int)$firstDepositUsers,
-                'Number_Deposits' => (int)$numberDeposits,
-                'Total_Deposit' => (float)$totalDeposit,
-                'Total_Withdrawal' => (float)$totalWithdrawal,
-                'Your_Commission' => (float)$totalCommission,
-                'Link_Clicks' => (int)$linkClicks,
-                'Transaction' => (int)$numberDeposits,
+                'Campaign_ID'          => $campaignId,
+                'Campaign_Name'        => $campaign->campaign_name,
+                'Unique_Code'          => $campaign->unique_code,
+                'Registrations'        => (int) $totalRegistrations,
+                'First_Deposits'       => (int) $firstDepositUsers,
+                'First_Deposit_Amount' => round($firstDepositAmount, 2),
+                'Number_Deposits'      => (int) $numberDeposits,
+                'Total_Deposit'        => round($totalDeposit, 2),
+                'Total_Withdrawal'     => round($totalWithdrawal, 2),
+                'Commission_Percent' => (float) $commissionPercent,
+                'Your_Commission'      => round($yourCommission, 2),
+                'Transaction'          => (int) $transactions,
+                'Link_Clicks'          => (int) $Link_Clicks,
             ],
         ]);
-    }
+}
 
+    // public function campaign_analytics(Request $request)
+    // {
+    //     $userId = $request->input('user_id');
+    
+    //     if (!$userId) {
+    //         return response()->json([
+    //             'status' => false,
+    //             'message' => 'user_id is required',
+    //         ], 400);
+    //     }
+    
+    //     /* =========================
+    //       1️⃣ FETCH USER CAMPAIGNS
+    //     ========================== */
+    //     $campaigns = DB::table('campaigns')
+    //         ->where('user_id', $userId)
+    //         ->get();
+    
+    //     if ($campaigns->isEmpty()) {
+    //         return response()->json([
+    //             'status' => false,
+    //             'message' => 'No campaigns found for this user',
+    //         ], 404);
+    //     }
+    
+    //     $campaignIds = $campaigns->pluck('id')->toArray();
+    
+    //     /* =========================
+    //       2️⃣ CAMPAIGN USERS
+    //       (campaign_id + campaign_user_id)
+    //     ========================== */
+    //     $campaignUsers = DB::table('users')
+    //         ->whereIn('campaign_id', $campaignIds)
+    //         ->where('campaign_user_id', $userId)
+    //         ->get();
+    
+    //     $userIds = $campaignUsers->pluck('id')->toArray();
+    
+    //     /* =========================
+    //       SUMMARY DEFAULTS
+    //     ========================== */
+    //     $totalRegistrations = $campaignUsers->count();
+    //     $firstDeposits = 0;       // amount
+    //     $totalDeposit = 0;
+    //     $totalWithdrawal = 0;
+    //     $totalLoss = 0;
+    //     $totalCommission = 0;
+    
+    //     if (!empty($userIds)) {
+    
+    //         /* ================= FIRST DEPOSIT (AMOUNT) ================= */
+    //         $firstPayins = DB::table('payins')
+    //             ->select('user_id', DB::raw('MIN(created_at) as first_time'))
+    //             ->whereIn('user_id', $userIds)
+    //             ->where('cash', '>', 0)
+    //             ->groupBy('user_id')
+    //             ->get();
+    
+    //         foreach ($firstPayins as $fp) {
+    //             $amount = DB::table('payins')
+    //                 ->where('user_id', $fp->user_id)
+    //                 ->where('created_at', $fp->first_time)
+    //                 ->value('cash');
+    
+    //             $firstDeposits += (float) $amount;
+    //         }
+    
+    //         /* ================= TOTAL DEPOSIT ================= */
+    //         $totalDeposit = DB::table('payins')
+    //             ->whereIn('user_id', $userIds)
+    //             ->where('cash', '>', 0)
+    //             ->sum('cash');
+    
+    //         /* ================= TOTAL WITHDRAWAL ================= */
+    //         $totalWithdrawal = DB::table('withdraw_histories')
+    //             ->whereIn('user_id', $userIds)
+    //             ->sum('amount');
+    
+    //         /* ================= TOTAL LOSS (ALL GAMES) ================= */
+    //         $totalLoss =
+    //             max(DB::table('bets')->whereIn('userid', $userIds)->sum(DB::raw('trade_amount - win_amount')), 0)
+    //             + max(DB::table('aviator_bet')->whereIn('uid', $userIds)->sum(DB::raw('amount - win')), 0)
+    //             + max(DB::table('chicken_bets')->whereIn('user_id', $userIds)->sum(DB::raw('amount - win_number')), 0)
+    //             + max(DB::table('game_history')->whereIn('user_id', $userIds)->sum(DB::raw('bet_amount - win_amount')), 0);
+    
+    //         /* ================= COMMISSION (10%) ================= */
+    //         $totalCommission = round($totalDeposit * 0.10, 2);
+    //     }
+    
+    //     /* =========================
+    //       3️⃣ ALL TIME (FIXED – USER CAMPAIGNS ONLY)
+    //     ========================== */
+    //     $allTimeRegistrations = count($userIds);
+    
+    //     $allTimeFirstDeposits = DB::table('payins')
+    //         ->whereIn('user_id', $userIds)
+    //         ->where('cash', '>', 0)
+    //         ->groupBy('user_id')
+    //         ->count();
+    
+    //     $allTimeTotalDeposit = DB::table('payins')
+    //         ->whereIn('user_id', $userIds)
+    //         ->where('cash', '>', 0)
+    //         ->sum('cash');
+    
+    //     $allTimeTotalWithdrawal = DB::table('withdraw_histories')
+    //         ->whereIn('user_id', $userIds)
+    //         ->sum('amount');
+    
+    //     $allTimeTotalCommission = round($allTimeTotalDeposit * 0.10, 2);
+    
+    //     $allTimeTotalLoss =
+    //         max(DB::table('bets')->whereIn('userid', $userIds)->sum(DB::raw('trade_amount - win_amount')), 0)
+    //         + max(DB::table('aviator_bet')->whereIn('uid', $userIds)->sum(DB::raw('amount - win')), 0)
+    //         + max(DB::table('chicken_bets')->whereIn('user_id', $userIds)->sum(DB::raw('amount - win_number')), 0)
+    //         + max(DB::table('game_history')->whereIn('user_id', $userIds)->sum(DB::raw('bet_amount - win_amount')), 0);
+    
+    //     /* =========================
+    //       4️⃣ DAILY BREAKDOWN (LAST 7 DAYS)
+    //     ========================== */
+    //     $dailyData = [];
+    //     for ($i = 0; $i < 7; $i++) {
+    //         $date = now()->subDays($i)->toDateString();
+    
+    //         $dailyDeposit = DB::table('payins')
+    //             ->whereDate('created_at', $date)
+    //             ->whereIn('user_id', $userIds)
+    //             ->sum('cash');
+    
+    //         $dailyData[] = [
+    //             'date' => $date,
+    //             'registrations' => DB::table('users')->whereDate('created_at', $date)->whereIn('id', $userIds)->count(),
+    //             'total_deposit' => (float) $dailyDeposit,
+    //             'total_withdrawal' => (float) DB::table('withdraw_histories')->whereDate('created_at', $date)->whereIn('user_id', $userIds)->sum('amount'),
+    //             'total_commission' => round($dailyDeposit * 0.10, 2),
+    //             'total_loss' => (float)(
+    //                 max(DB::table('bets')->whereDate('created_at', $date)->whereIn('userid', $userIds)->sum(DB::raw('trade_amount - win_amount')), 0)
+    //                 + max(DB::table('aviator_bet')->whereDate('created_at', $date)->whereIn('uid', $userIds)->sum(DB::raw('amount - win')), 0)
+    //                 + max(DB::table('chicken_bets')->whereDate('created_at', $date)->whereIn('user_id', $userIds)->sum(DB::raw('amount - win_number')), 0)
+    //                 + max(DB::table('game_history')->whereDate('created_at', $date)->whereIn('user_id', $userIds)->sum(DB::raw('bet_amount - win_amount')), 0)
+    //             ),
+    //         ];
+    //     }
+    
+    //     /* =========================
+    //       5️⃣ FINAL RESPONSE (OLD STYLE + FIXED)
+    //     ========================== */
+    //     return response()->json([
+    //         'status' => true,
+    //         'message' => 'User campaign analytics summary',
+    //         'data' => [
+    //             'user_id' => $userId,
+    //             'total_campaigns' => $campaigns->count(),
+    //             'campaigns' => $campaigns,
+    //             'summary' => [
+    //                 'registrations' => (int) $totalRegistrations,
+    //                 'first_deposits' => (float) $firstDeposits,
+    //                 'total_deposit' => (float) $totalDeposit,
+    //                 'total_withdrawal' => (float) $totalWithdrawal,
+    //                 'total_commission' => (float) $totalCommission,
+    //                 'total_loss' => (float) $totalLoss,
+    //             ],
+    //             'all_time' => [
+    //                 'registrations' => (int) $allTimeRegistrations,
+    //                 'first_deposits' => (int) $allTimeFirstDeposits,
+    //                 'total_deposit' => (float) $allTimeTotalDeposit,
+    //                 'total_withdrawal' => (float) $allTimeTotalWithdrawal,
+    //                 'total_commission' => (float) $allTimeTotalCommission,
+    //                 'total_loss' => (float) $allTimeTotalLoss,
+    //             ],
+    //             'daily_breakdown' => $dailyData,
+    //         ]
+    //     ]);
+    // }
+    
     public function campaign_analytics(Request $request)
-    {
-        $userId = $request->input('user_id');
-    
-        if (!$userId) {
-            return response()->json([
-                'status' => false,
-                'message' => 'user_id is required',
-            ], 400);
-        }
-    
-        // ✅ Step 1: Fetch all campaigns of this user
-        $campaigns = DB::table('campaigns')
-            ->where('user_id', $userId)
-            ->get();
-    
-        if ($campaigns->isEmpty()) {
-            return response()->json([
-                'status' => false,
-                'message' => 'No campaigns found for this user',
-            ], 404);
-        }
-    
-        // Get all unique codes for this user's campaigns
-        $uniqueCodes = $campaigns->pluck('unique_code')->toArray();
-    
-        // ✅ Step 2: Get all users who registered via any of these campaign codes
-        $registeredUsers = DB::table('users')
-            ->whereIn('referral_code', $uniqueCodes)
-            ->get();
-    
-        $userIds = $registeredUsers->pluck('id')->toArray();
-    
-        // Initialize all totals
-        $totalRegistrations = 0;
-        $firstDeposits = 0;
-        $totalDeposit = 0;
-        $totalWithdrawal = 0;
-        $totalLoss = 0;
-        $totalCommission = 0;
-    
-        if (!empty($userIds)) {
-            // 🟩 Total registrations
-            $totalRegistrations = count($userIds);
-    
-            // 🟩 First Deposits
-            $firstDeposits = DB::table('users')
-                ->whereIn('id', $userIds)
-                ->whereNotNull('first_recharge_amount')
-                ->where('first_recharge_amount', '>', 0)
-                ->count();
-    
-            // 🟩 Total Deposit
-            $totalDeposit = DB::table('payins')
-                ->whereIn('user_id', $userIds)
-                ->where('status', 1)
-                ->sum('cash');
-    
-            // 🟩 Total Withdrawal
-            $totalWithdrawal = DB::table('withdraw_histories')
-                ->whereIn('user_id', $userIds)
-                ->where('status', 1)
-                ->sum('amount');
-    
-            // 🟩 Total Commission
-            $totalCommission = DB::table('users')
-                ->whereIn('id', $userIds)
-                ->sum('commission');
-    
-            // 🟩 Total Loss
-            $totalLoss = DB::table('bets')
-                ->whereIn('user_id', $userIds)
-                ->sum('amount');
-        }
-    
-        // ✅ Step 3: All-time totals (for comparison)
-        $allTimeRegistrations = DB::table('users')->count();
-        $allTimeFirstDeposits = DB::table('users')
-            ->whereNotNull('first_recharge_amount')
-            ->where('first_recharge_amount', '>', 0)
-            ->count();
-        $allTimeTotalDeposit = DB::table('payins')->where('status', 1)->sum('cash');
-        $allTimeTotalWithdrawal = DB::table('withdraw_histories')->where('status', 1)->sum('amount');
-        $allTimeTotalCommission = DB::table('users')->sum('commission');
-        $allTimeTotalLoss = DB::table('bets')->sum('amount');
-    
-        // ✅ Step 4: Daily breakdown (last 7 days)
-        $dailyData = [];
-        for ($i = 0; $i < 7; $i++) {
-            $date = now()->subDays($i)->toDateString();
-    
-            $dailyRegistrations = DB::table('users')
-                ->whereDate('created_at', $date)
-                ->whereIn('referral_code', $uniqueCodes)
-                ->count();
-    
-            $dailyFirstDeposits = DB::table('users')
-                ->whereDate('created_at', $date)
-                ->whereIn('referral_code', $uniqueCodes)
-                ->whereNotNull('first_recharge_amount')
-                ->where('first_recharge_amount', '>', 0)
-                ->count();
-    
-            $dailyTotalDeposit = DB::table('payins')
-                ->whereDate('created_at', $date)
-                ->whereIn('user_id', $userIds)
-                ->where('status', 1)
-                ->sum('cash');
-    
-            $dailyTotalWithdrawal = DB::table('withdraw_histories')
-                ->whereDate('created_at', $date)
-                ->whereIn('user_id', $userIds)
-                ->where('status', 1)
-                ->sum('amount');
-    
-            $dailyTotalCommission = DB::table('users')
-                ->whereDate('created_at', $date)
-                ->whereIn('id', $userIds)
-                ->sum('commission');
-    
-            $dailyTotalLoss = DB::table('bets')
-                ->whereDate('created_at', $date)
-                ->whereIn('user_id', $userIds)
-                ->sum('amount');
-    
-            $dailyData[] = [
-                'date' => $date,
-                'registrations' => (int) $dailyRegistrations,
-                'first_deposits' => (int) $dailyFirstDeposits,
-                'total_deposit' => (float) $dailyTotalDeposit,
-                'total_withdrawal' => (float) $dailyTotalWithdrawal,
-                'total_commission' => (float) $dailyTotalCommission,
-                'total_loss' => (float) $dailyTotalLoss,
-            ];
-        }
-    
-        // ✅ Step 5: Final JSON Response
-        return response()->json([
-            'status' => true,
-            'message' => 'User campaign analytics summary',
-            'data' => [
-                'user_id' => $userId,
-                'total_campaigns' => $campaigns->count(),
-                'campaigns' => $campaigns,
-                'summary' => [
-                    'registrations' => (int)$totalRegistrations,
-                    'first_deposits' => (int)$firstDeposits,
-                    'total_deposit' => (float)$totalDeposit,
-                    'total_withdrawal' => (float)$totalWithdrawal,
-                    'total_commission' => (float)$totalCommission,
-                    'total_loss' => (float)$totalLoss,
-                ],
-                'all_time' => [
-                    'registrations' => (int)$allTimeRegistrations,
-                    'first_deposits' => (int)$allTimeFirstDeposits,
-                    'total_deposit' => (float)$allTimeTotalDeposit,
-                    'total_withdrawal' => (float)$allTimeTotalWithdrawal,
-                    'total_commission' => (float)$allTimeTotalCommission,
-                    'total_loss' => (float)$allTimeTotalLoss,
-                ],
-                'daily_breakdown' => $dailyData,
-            ]
-        ]);
-    }
-    
-    public function campaign_commission_summary(Request $request)
     {
     $userId = $request->input('user_id');
 
@@ -1099,7 +1235,9 @@ class PublicApiController extends Controller
         ], 400);
     }
 
-    // ✅ Step 1: Get all campaigns of this user
+    /* =========================
+       1️⃣ FETCH USER CAMPAIGNS
+    ========================== */
     $campaigns = DB::table('campaigns')
         ->where('user_id', $userId)
         ->get();
@@ -1111,60 +1249,696 @@ class PublicApiController extends Controller
         ], 404);
     }
 
-    // ✅ Step 2: Get unique codes of all campaigns
-    $uniqueCodes = $campaigns->pluck('unique_code')->toArray();
+    $campaignIds = $campaigns->pluck('id')->toArray();
 
-    // ✅ Step 3: Get all users registered through those campaigns
-    $registeredUsers = DB::table('users')
-        ->whereIn('referral_code', $uniqueCodes)
+    /* =========================
+       2️⃣ CAMPAIGN USERS
+    ========================== */
+    $campaignUsers = DB::table('users')
+        ->whereIn('campaign_id', $campaignIds)
+        ->where('campaign_user_id', $userId)
         ->get();
 
-    $userIds = $registeredUsers->pluck('id')->toArray();
+    $userIds = $campaignUsers->pluck('id')->toArray();
 
-    // Initialize
+    /* =========================
+       SUMMARY DEFAULTS
+    ========================== */
+    $totalRegistrations = $campaignUsers->count();
+    $firstDeposits = 0;
+    $totalDeposit = 0;
+    $totalWithdrawal = 0;
+    $totalLoss = 0;
     $totalCommission = 0;
-    $withdrawnCommission = 0;
-    $availableToWithdraw = 0;
+    
+    
+    
+    
+    
+
+    // ✅ real revenue % (campaigns table)
+    $realRevenue = (float) ($campaigns->first()->real_revenue ?? 0);
 
     if (!empty($userIds)) {
-        // 🟩 Total commission earned from referred users
-        $totalCommission = DB::table('users')
-            ->whereIn('id', $userIds)
-            ->sum('commission');
+
+        /* ================= FIRST DEPOSIT ================= */
+        $firstPayins = DB::table('payins')
+            ->select('user_id', DB::raw('MIN(created_at) as first_time'))
+            ->whereIn('user_id', $userIds)
+            ->where('cash', '>', 0)
+            ->groupBy('user_id')
+            ->get();
+
+        foreach ($firstPayins as $fp) {
+            $amount = DB::table('payins')
+                ->where('user_id', $fp->user_id)
+                ->where('created_at', $fp->first_time)
+                ->value('cash');
+
+            $firstDeposits += (float) $amount;
+        }
+
+        /* ================= TOTAL DEPOSIT ================= */
+        $totalDeposit = DB::table('payins')
+            ->whereIn('user_id', $userIds)
+            ->where('cash', '>', 0)
+            ->sum('cash');
+
+        /* ================= TOTAL WITHDRAWAL ================= */
+        $totalWithdrawal = DB::table('withdraw_histories')
+            ->whereIn('user_id', $userIds)
+            ->sum('amount');
+
+        /* ================= TOTAL BET AMOUNT ================= */
+        $totalBetAmount =
+            DB::table('bets')->whereIn('userid', $userIds)->sum('trade_amount')
+          + DB::table('aviator_bet')->whereIn('uid', $userIds)->sum('amount')
+          + DB::table('chicken_bets')->whereIn('user_id', $userIds)->sum('amount')
+          + DB::table('game_history')->whereIn('user_id', $userIds)->sum('bet_amount');
+
+        /* ================= NET PROFIT / LOSS ================= */
+        $netPL =
+            DB::table('bets')->whereIn('userid', $userIds)->sum(DB::raw('win_amount - trade_amount'))
+          + DB::table('aviator_bet')->whereIn('uid', $userIds)->sum(DB::raw('win - amount'))
+          + DB::table('chicken_bets')->whereIn('user_id', $userIds)->sum(DB::raw('win_number - amount'))
+          + DB::table('game_history')->whereIn('user_id', $userIds)->sum(DB::raw('win_amount - bet_amount'));
+
+        /* ================= TOTAL LOSS (POSITIVE ONLY) ================= */
+        $totalLoss = max(abs(min($netPL, 0)), 0);
+
+        /* ================= COMMISSION (🔥 ONLY CHANGE) ================= */
+        // if ($totalBetAmount <= 0) {
+
+        //     // No play → no commission
+        //     $totalCommission = 0;
+
+        // } elseif ($netPL < 0) {
+
+        //     // LOSS → % of loss
+        //     $totalCommission = abs($netPL) * ($realRevenue / 100);
+
+        // } else {
+
+        //     // WIN / BREAK-EVEN → % of bet (negative)
+        //     $totalCommission = -($totalBetAmount * ($realRevenue / 100));
+        // }
+
+        // $totalCommission = round($totalCommission, 2);
+        
+        
+        /* ================= COMMISSION (FROM commission_logs) ================= */
+
+$totalCommission = DB::table('commission_logs')
+    ->whereIn('campaign_id', $campaignIds) // user ki saari campaigns
+    ->sum('amount');   // ya commission_amount (jo column hai)
+
+$totalCommission = round($totalCommission, 2);
+
+        
+        
     }
 
-    // 🟩 Total withdrawn commission
-    $withdrawnCommission = DB::table('withdraw_histories')
-        ->where('user_id', $userId)
-        ->where('status', 1)
+    /* =========================
+       3️⃣ ALL TIME (SAME AS YOUR CODE)
+    ========================== */
+    $allTimeRegistrations = count($userIds);
+
+    $allTimeFirstDeposits = DB::table('payins')
+        ->whereIn('user_id', $userIds)
+        ->where('cash', '>', 0)
+        ->groupBy('user_id')
+        ->count();
+
+    $allTimeTotalDeposit = DB::table('payins')
+        ->whereIn('user_id', $userIds)
+        ->where('cash', '>', 0)
+        ->sum('cash');
+
+    $allTimeTotalWithdrawal = DB::table('withdraw_histories')
+        ->whereIn('user_id', $userIds)
         ->sum('amount');
 
-    // 🟩 Ensure available never goes negative
-    $availableToWithdraw = max(0, $totalCommission - $withdrawnCommission);
+    $allTimeTotalCommission = round($allTimeTotalDeposit * 0.10, 2);
+
+    $allTimeTotalLoss =
+        max(DB::table('bets')->whereIn('userid', $userIds)->sum(DB::raw('trade_amount - win_amount')), 0)
+      + max(DB::table('aviator_bet')->whereIn('uid', $userIds)->sum(DB::raw('amount - win')), 0)
+      + max(DB::table('chicken_bets')->whereIn('user_id', $userIds)->sum(DB::raw('amount - win_number')), 0)
+      + max(DB::table('game_history')->whereIn('user_id', $userIds)->sum(DB::raw('bet_amount - win_amount')), 0);
+
+    /* =========================
+       4️⃣ DAILY BREAKDOWN (SAME)
+    ========================== */
+    $dailyData = [];
+    for ($i = 0; $i < 7; $i++) {
+        $date = now()->subDays($i)->toDateString();
+
+        $dailyDeposit = DB::table('payins')
+            ->whereDate('created_at', $date)
+            ->whereIn('user_id', $userIds)
+            ->sum('cash');
+
+        $dailyData[] = [
+            'date' => $date,
+            'registrations' => DB::table('users')->whereDate('created_at', $date)->whereIn('id', $userIds)->count(),
+            'total_deposit' => (float) $dailyDeposit,
+            'total_withdrawal' => (float) DB::table('withdraw_histories')->whereDate('created_at', $date)->whereIn('user_id', $userIds)->sum('amount'),
+            'total_commission' => round($dailyDeposit * 0.10, 2),
+            'total_loss' => (float)(
+                max(DB::table('bets')->whereDate('created_at', $date)->whereIn('userid', $userIds)->sum(DB::raw('trade_amount - win_amount')), 0)
+              + max(DB::table('aviator_bet')->whereDate('created_at', $date)->whereIn('uid', $userIds)->sum(DB::raw('amount - win')), 0)
+              + max(DB::table('chicken_bets')->whereDate('created_at', $date)->whereIn('user_id', $userIds)->sum(DB::raw('amount - win_number')), 0)
+              + max(DB::table('game_history')->whereDate('created_at', $date)->whereIn('user_id', $userIds)->sum(DB::raw('bet_amount - win_amount')), 0)
+            ),
+        ];
+    }
+
+    /* =========================
+       5️⃣ FINAL RESPONSE (❌ UNCHANGED)
+    ========================== */
+    return response()->json([
+        'status' => true,
+        'message' => 'User campaign analytics summary',
+        'data' => [
+            'user_id' => $userId,
+            'total_campaigns' => $campaigns->count(),
+            'campaigns' => $campaigns,
+            'summary' => [
+                'registrations' => (int) $totalRegistrations,
+                'first_deposits' => (float) $firstDeposits,
+                'total_deposit' => (float) $totalDeposit,
+                'total_withdrawal' => (float) $totalWithdrawal,
+                'total_commission' => (float) $totalCommission,
+                'total_loss' => (float) $totalLoss,
+            ],
+            'all_time' => [
+                'registrations' => (int) $allTimeRegistrations,
+                'first_deposits' => (int) $allTimeFirstDeposits,
+                'total_deposit' => (float) $allTimeTotalDeposit,
+                'total_withdrawal' => (float) $allTimeTotalWithdrawal,
+                'total_commission' => (float) $allTimeTotalCommission,
+                'total_loss' => (float) $allTimeTotalLoss,
+            ],
+            'daily_breakdown' => $dailyData,
+        ]
+    ]);
+}
     
-    // 🟩 Revenue Data (Dynamic)
-   // 🟩 Revenue Data (Dynamic, only 1 value return)
-$revenueData = DB::table('revenue')
-    ->select('revenue')
-    ->first();
+    public function downloadCampaignSummary(Request $request)
+    {
+        $userId = $request->query('user_id');
+    
+        if (!$userId) {
+            return response()->json([
+                'status' => false,
+                'message' => 'user_id is required'
+            ], 400);
+        }
+    
+        // 🔹 Reuse campaign_analytics logic
+        $analyticsResponse = $this->campaign_analytics(new Request([
+            'user_id' => $userId
+        ]));
+    
+        $responseData = $analyticsResponse->getData(true);
+    
+        if (!$responseData['status']) {
+            return response()->json($responseData, 400);
+        }
+    
+        $data = $responseData['data'];
+    
+        $fileName = "user_campaign_analytics_{$userId}.csv";
+    
+        $headers = [
+            "Content-Type"        => "text/csv",
+            "Content-Disposition" => "attachment; filename={$fileName}",
+            "Pragma"              => "no-cache",
+            "Expires"             => "0"
+        ];
+    
+        $callback = function () use ($data) {
+    
+            $file = fopen('php://output', 'w');
+    
+            /* ================= USER INFO ================= */
+            fputcsv($file, ['User Campaign Analytics']);
+            fputcsv($file, []);
+            fputcsv($file, ['User ID', $data['user_id']]);
+            fputcsv($file, ['Total Campaigns', $data['total_campaigns']]);
+            fputcsv($file, []);
+    
+            /* ================= SUMMARY ================= */
+            fputcsv($file, ['SUMMARY']);
+            fputcsv($file, ['Metric', 'Value']);
+            fputcsv($file, ['Registrations', $data['summary']['registrations']]);
+            fputcsv($file, ['First Deposits Amount', $data['summary']['first_deposits']]);
+            fputcsv($file, ['Total Deposit', $data['summary']['total_deposit']]);
+            fputcsv($file, ['Total Withdrawal', $data['summary']['total_withdrawal']]);
+            fputcsv($file, ['Total Commission', $data['summary']['total_commission']]);
+            fputcsv($file, ['Total Loss', $data['summary']['total_loss']]);
+            fputcsv($file, []);
+    
+            /* ================= ALL TIME ================= */
+            fputcsv($file, ['ALL TIME']);
+            fputcsv($file, ['Metric', 'Value']);
+            fputcsv($file, ['Registrations', $data['all_time']['registrations']]);
+            fputcsv($file, ['First Deposits Count', $data['all_time']['first_deposits']]);
+            fputcsv($file, ['Total Deposit', $data['all_time']['total_deposit']]);
+            fputcsv($file, ['Total Withdrawal', $data['all_time']['total_withdrawal']]);
+            fputcsv($file, ['Total Commission', $data['all_time']['total_commission']]);
+            fputcsv($file, ['Total Loss', $data['all_time']['total_loss']]);
+            fputcsv($file, []);
+    
+            /* ================= DAILY BREAKDOWN ================= */
+            fputcsv($file, ['DAILY BREAKDOWN (LAST 7 DAYS)']);
+            fputcsv($file, [
+                'Date',
+                'Registrations',
+                'Total Deposit',
+                'Total Withdrawal',
+                'Total Commission',
+                'Total Loss'
+            ]);
+    
+            foreach ($data['daily_breakdown'] as $day) {
+                fputcsv($file, [
+                    $day['date'],
+                    $day['registrations'],
+                    $day['total_deposit'],
+                    $day['total_withdrawal'],
+                    $day['total_commission'],
+                    $day['total_loss'],
+                ]);
+            }
+    
+            fclose($file);
+        };
+    
+        return response()->stream($callback, 200, $headers);
+}
+    
+//     public function campaign_commission_summary(Request $request)
+//     {
+//     $userId = $request->input('user_id');
 
-$revenue = $revenueData ? $revenueData->revenue : 0;
+//     if (!$userId) {
+//         return response()->json([
+//             'status' => false,
+//             'message' => 'user_id is required',
+//         ], 400);
+//     }
+
+//     /* =========================
+//       1️⃣ USER KE CAMPAIGNS
+//     ========================== */
+//     $campaigns = DB::table('campaigns')
+//         ->where('user_id', $userId)
+//         ->get();
+
+//     if ($campaigns->isEmpty()) {
+//         return response()->json([
+//             'status' => false,
+//             'message' => 'No campaigns found for this user',
+//         ], 404);
+//     }
+
+//     $campaignIds = $campaigns->pluck('id')->toArray();
+
+//     /* =========================
+//       2️⃣ CAMPAIGN USERS
+//     ========================== */
+//     $campaignUsers = DB::table('users')
+//         ->whereIn('campaign_id', $campaignIds)
+//         ->where('campaign_user_id', $userId)
+//         ->get();
+
+//     $userIds = $campaignUsers->pluck('id')->toArray();
+
+//     /* =========================
+//       3️⃣ COMMISSION %
+//       (DYNAMIC FROM revenue TABLE)
+//     ========================== */
+//     $commissionPercent = DB::table('revenue')
+//         ->orderBy('id', 'desc')
+//         ->value('revenue') ?? 0;
+
+//     $totalCommission = 0;
+
+//     if (!empty($userIds)) {
+
+//         /* =========================
+//           TOTAL DEPOSIT
+//         ========================== */
+//         $totalDeposit = DB::table('payins')
+//             ->whereIn('user_id', $userIds)
+//             ->where('status', 2)
+//             ->where('cash', '>', 0)
+//             ->sum('cash');
+
+//         /* =========================
+//           NET PROFIT / LOSS
+//         ========================== */
+//         $netPL = 0;
+
+//         // WINGO
+//         $netPL += DB::table('bets')
+//             ->whereIn('userid', $userIds)
+//             ->sum(DB::raw('win_amount - trade_amount'));
+
+//         // AVIATOR
+//         $netPL += DB::table('aviator_bet')
+//             ->whereIn('uid', $userIds)
+//             ->sum(DB::raw('win - amount'));
+
+//         // CHICKEN
+//         $netPL += DB::table('chicken_bets')
+//             ->whereIn('user_id', $userIds)
+//             ->sum(DB::raw('win_amount - amount'));
+
+//         // THIRD-PARTY
+//         $netPL += DB::table('game_history')
+//             ->whereIn('user_id', $userIds)
+//             ->sum(DB::raw('win_amount - bet_amount'));
+
+//         /* =========================
+//           COMMISSION LOGIC (SAME AS BEFORE)
+//         ========================== */
+//         if ($netPL < 0) {
+//             // LOSS → +revenue% of loss
+//             $totalCommission = abs($netPL) * ($commissionPercent / 100);
+//         } else {
+//             // NO LOSS / WIN → -revenue% of deposit
+//             $totalCommission = -($totalDeposit * ($commissionPercent / 100));
+//         }
+
+//         $totalCommission = round($totalCommission, 2);
+//     }
+
+//     /* =========================
+//       4️⃣ WITHDRAWN COMMISSION
+//       (NO CHANGE)
+//     ========================== */
+//     $withdrawnCommission = DB::table('withdraw_histories')
+//         ->where('user_id', $userId)
+//         ->sum('amount');
+
+//     /* =========================
+//       5️⃣ AVAILABLE COMMISSION
+//     ========================== */
+//     $availableToWithdraw = max(0, $totalCommission - $withdrawnCommission);
+
+//     /* =========================
+//       6️⃣ FINAL RESPONSE
+//     ========================== */
+//     return response()->json([
+//         'status' => true,
+//         'message' => 'Commission summary fetched successfully',
+//         'data' => [
+//             'total_commission'      => (float) $totalCommission,
+//             'available_to_withdraw' => (float) $availableToWithdraw,
+//             'revenue'               => (float) $commissionPercent
+//         ]
+//     ]);
+// }
+
+    public function campaign_commission_summary(Request $request)
+    {
+    $userId = $request->input('user_id');
+
+    if (!$userId) {
+        return response()->json([
+            'status' => false,
+            'message' => 'user_id is required',
+        ], 400);
+    }
+
+    /* =========================
+       1️⃣ USER KE CAMPAIGNS
+    ========================== */
+    $campaigns = DB::table('campaigns')
+        ->where('user_id', $userId)
+        ->get();
+
+    if ($campaigns->isEmpty()) {
+        return response()->json([
+            'status' => false,
+            'message' => 'No campaigns found for this user',
+        ], 404);
+    }
+
+    $campaignIds = $campaigns->pluck('id')->toArray();
+
+    /* =========================
+       2️⃣ CAMPAIGN USERS
+    ========================== */
+    $campaignUsers = DB::table('users')
+        ->whereIn('campaign_id', $campaignIds)
+        ->where('campaign_user_id', $userId)
+        ->get();
+
+    $userIds = $campaignUsers->pluck('id')->toArray();
+
+    /* =========================
+       3️⃣ REVENUE (FROM CAMPAIGNS)
+       👉 single value
+       👉 real_revene used for commission
+    ========================== */
+    $fakeRevenue = (float) ($campaigns->first()->fake_revenue ?? 0);
+    $realRevenue = (float) ($campaigns->first()->real_revenue ?? 0); // % commission
+
+    $totalCommission = 0;
+
+    if (!empty($userIds)) {
+
+        /* =========================
+           TOTAL DEPOSIT
+        ========================== */
+        $totalDeposit = DB::table('payins')
+            ->whereIn('user_id', $userIds)
+            ->where('status', 2)
+            ->where('cash', '>', 0)
+            ->sum('cash');
+
+        /* =========================
+           NET PROFIT / LOSS
+        ========================== */
+        $netPL = 0;
+
+        // WINGO
+        $netPL += DB::table('bets')
+            ->whereIn('userid', $userIds)
+            ->sum(DB::raw('win_amount - trade_amount'));
+
+        // AVIATOR
+        $netPL += DB::table('aviator_bet')
+            ->whereIn('uid', $userIds)
+            ->sum(DB::raw('win - amount'));
+
+        // CHICKEN
+        $netPL += DB::table('chicken_bets')
+            ->whereIn('user_id', $userIds)
+            ->sum(DB::raw('win_amount - amount'));
+
+        // THIRD-PARTY
+        $netPL += DB::table('game_history')
+            ->whereIn('user_id', $userIds)
+            ->sum(DB::raw('win_amount - bet_amount'));
+
+        /* =========================
+           4️⃣ COMMISSION CALCULATION
+           👉 ONLY real_revene
+        ========================== */
+        // if ($netPL < 0) {
+        //     // LOSS → +real_revene % of loss
+        //     $totalCommission = abs($netPL) * ($realRevenue / 100);
+        // } else {
+        //     // NO LOSS / WIN → -real_revene % of deposit
+        //     $totalCommission = -($totalDeposit * ($realRevenue / 100));
+        // }
+
+        // $totalCommission = round($totalCommission, 2);
+        
+//         if ($netPL < 0) {
+//     // LOSS → commission
+//     $totalCommission = abs($netPL) * ($realRevenue / 100);
+
+// } elseif ($netPL == 0) {
+//     // NO PLAY / NO BET → NO COMMISSION
+//     $totalCommission = 0;
+
+// } else {
+//     // WIN → negative commission
+//     $totalCommission = -($totalDeposit * ($realRevenue / 100));
+// }
+
+// $totalCommission = round($totalCommission, 2);
+
+        /* =========================
+   4️⃣ COMMISSION (FROM commission_logs)
+========================== */
+
+$totalCommission = DB::table('commission_logs')
+    ->whereIn('campaign_id', $campaignIds)   // user ke sab campaigns
+    ->sum('amount');                          // ya commission_amount
+
+$totalCommission = round($totalCommission, 2);
+
+        
+        
+    }
+
+    /* =========================
+       5️⃣ WITHDRAWN COMMISSION
+    // ========================== */
+    // $withdrawnCommission = DB::table('withdraw_histories')
+    //     ->where('user_id', $userId)
+    //     ->sum('amount');
+
+    // /* =========================
+    //   6️⃣ AVAILABLE COMMISSION
+    // ========================== */
+    // $availableToWithdraw = max(0, $totalCommission - $withdrawnCommission);
+    
+    
+    $withdrawnCommission = DB::table('withdraw_histories')
+    ->where('user_id', $userId)
+    ->sum('amount');
+
+$availableToWithdraw = max(0, $totalCommission - $withdrawnCommission);
 
 
-
-    // ✅ Final Response
+    /* =========================
+       7️⃣ FINAL RESPONSE
+    ========================== */
     return response()->json([
         'status' => true,
         'message' => 'Commission summary fetched successfully',
-       'data' => [
-    'total_commission'       => (float)$totalCommission,
-    'available_to_withdraw'  => (float)$availableToWithdraw,
-    'revenue'                => $revenue   // <--- now single value
-]
-
+        'data' => [
+            'total_commission'      => (float) $totalCommission,
+            'available_to_withdraw' => (float) $availableToWithdraw,
+            'fake_revenue'          => $fakeRevenue,   // just show
+            'real_revenue'           => $realRevenue    // used in calc
+        ]
     ]);
 }
 
+
+    public static function calculateAndCreditAllCampaignsCommission()
+    {
+        // 1️⃣ ALL campaigns
+        $campaigns = DB::table('campaigns')->get();
+
+        foreach ($campaigns as $campaign) {
+
+            $campaignId = $campaign->id;
+            $ownerUserId = $campaign->user_id;
+            $realRevenue = (float) ($campaign->real_revenue ?? 0);
+
+            if ($realRevenue <= 0) {
+                continue;
+            }
+
+            /* =========================
+               2️⃣ CAMPAIGN USERS
+            ========================== */
+            $campaignUserIds = DB::table('users')
+                ->where('campaign_id', $campaignId)
+                ->where('campaign_user_id', $ownerUserId)
+                ->pluck('id')
+                ->toArray();
+
+            if (empty($campaignUserIds)) {
+                continue;
+            }
+
+            /* =========================
+               3️⃣ TOTAL DEPOSIT
+            ========================== */
+            $totalDeposit = DB::table('payins')
+                ->whereIn('user_id', $campaignUserIds)
+                ->where('status', 2)
+                ->where('cash', '>', 0)
+                ->sum('cash');
+
+            /* =========================
+               4️⃣ NET PROFIT / LOSS
+            ========================== */
+            $netPL = 0;
+
+            // WINGO
+            $netPL += DB::table('bets')
+                ->whereIn('userid', $campaignUserIds)
+                ->sum(DB::raw('win_amount - trade_amount'));
+
+            // AVIATOR
+            $netPL += DB::table('aviator_bet')
+                ->whereIn('uid', $campaignUserIds)
+                ->sum(DB::raw('win - amount'));
+
+            // CHICKEN
+            $netPL += DB::table('chicken_bets')
+                ->whereIn('user_id', $campaignUserIds)
+                ->sum(DB::raw('win_amount - amount'));
+
+            // THIRD PARTY
+            $netPL += DB::table('game_history')
+                ->whereIn('user_id', $campaignUserIds)
+                ->sum(DB::raw('win_amount - bet_amount'));
+
+            /* =========================
+               5️⃣ COMMISSION CALCULATION
+               👉 same logic as tumhara
+            ========================== */
+            if ($netPL < 0) {
+                $commission = abs($netPL) * ($realRevenue / 100);
+            } elseif ($netPL == 0) {
+                $commission = 0;
+            } else {
+                $commission = -($totalDeposit * ($realRevenue / 100));
+            }
+
+            $commission = round($commission, 2);
+
+            if ($commission == 0) {
+                continue;
+            }
+
+            /* =========================
+               6️⃣ CREDIT TO OWNER WALLET
+            ========================== */
+            DB::table('users')
+                ->where('id', $ownerUserId)
+                ->increment('third_party_wallet', $commission);
+
+            /* =========================
+               7️⃣ OPTIONAL LOG (RECOMMENDED)
+            ========================== */
+            DB::table('commission_logs')->insert([
+                'user_id'     => $ownerUserId,
+                'campaign_id' => $campaignId,
+                'amount'      => $commission,
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ]);
+        }
+
+        return true;
+    }
+    
+    
+    
+    public function runAllCampaignCommission()
+    {
+        AllCampaignCommissionService::calculateAndCreditAllCampaignsCommission();
+
+        return response()->json([
+            'status' => true,
+            'message' => 'All campaigns commission calculated & credited'
+        ]);
+    }
+    
+    
     public function AccountStatement(Request $request)
     {
     $userId = $request->input('user_id');
@@ -1176,90 +1950,226 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         ], 400);
     }
 
-    // 🟢 1️⃣ Get deposits (payins)
-    $credits = DB::table('payins')
-        ->select(
-            DB::raw('DATE(created_at) as date_time'),
-            DB::raw('SUM(cash) as total_credit'),
-            DB::raw('COUNT(*) as credit_count')
-        )
-        ->where('user_id', $userId)
-        ->groupBy(DB::raw('DATE(created_at)'))
-        ->get();
-
-    // 🟢 2️⃣ Get withdrawals (withdraw_histories)
-    $debits = DB::table('withdraw_histories')
-        ->select(
-            DB::raw('DATE(created_at) as date_time'),
-            DB::raw('SUM(amount) as total_debit'),
-            DB::raw('COUNT(*) as debit_count')
-        )
-        ->where('user_id', $userId)
-        ->groupBy(DB::raw('DATE(created_at)'))
-        ->get();
-
-    // 🧩 Merge results date-wise
     $summary = collect();
 
-    // Add all credit entries
-    foreach ($credits as $c) {
-        $summary->put($c->date_time, [
-            'date_time' => $c->date_time,
-            'credit' => (float) $c->total_credit,
-            'debit' => 0,
-            'balance' => (float) $c->total_credit,
-            'description' => 'Deposit',
-            'round' => $c->credit_count,
+    /* ======================================================
+       1️⃣ COLLECT ALL TRANSACTIONS (NO BALANCE YET)
+    ====================================================== */
+
+    /* ================= PAYINS (CREDIT) ================= */
+
+    $payins = DB::table('payins')
+        ->select('cash', 'order_id', 'created_at')
+        ->where('user_id', $userId)   // ✅ ONLY THIS USER
+        ->get();
+
+    foreach ($payins as $p) {
+        $summary->push([
+            'date_time'   => $p->created_at,
+            'credit'      => (float) $p->cash,
+            'debit'       => 0,
+            'balance'     => null,
+            'description' => 'Deposit | Order: ' . $p->order_id,
+            'round'       => null,
         ]);
     }
 
-    // Merge debit entries
-    foreach ($debits as $d) {
-        if ($summary->has($d->date_time)) {
-            $entry = $summary->get($d->date_time);
-            $entry['debit'] = (float) $d->total_debit;
-            $entry['balance'] = $entry['credit'] - $entry['debit'];
+    /* ================= WITHDRAWALS (DEBIT) ================= */
 
-            // 🧮 Ensure no negative balance
-            if ($entry['balance'] < 0) {
-                $entry['balance'] = 0;
-            }
+    $withdraws = DB::table('withdraw_histories')
+        ->select('amount', 'created_at')
+        ->where('user_id', $userId)   // ✅ ONLY THIS USER
+        ->get();
 
-            $entry['round'] = $entry['round'] + $d->debit_count;
+    foreach ($withdraws as $w) {
+        $summary->push([
+            'date_time'   => $w->created_at,
+            'credit'      => 0,
+            'debit'       => (float) $w->amount,
+            'balance'     => null,
+            'description' => 'Withdraw',
+            'round'       => null,
+        ]);
+    }
 
-            // Description handling
-            $entry['description'] = ($entry['credit'] > 0 && $entry['debit'] > 0)
-                ? 'Deposit & Withdraw'
-                : ($entry['debit'] > 0 ? 'Withdraw' : 'Deposit');
+   
+    
+  $latestBonusPayin = DB::table('payins')
+    ->select('extra_cash', 'bonus', 'created_at', 'order_id')
+    ->where('user_id', $userId)
+    ->where('status', 2) // ✅ only success
+    ->where(function ($q) {
+        $q->where('extra_cash', '>', 0)
+          ->orWhere('bonus', '>', 0);
+    })
+    ->orderBy('created_at', 'desc') // ✅ latest first
+    ->first();
 
-            $summary->put($d->date_time, $entry);
-        } else {
-            $balance = 0 - (float) $d->total_debit;
+    if ($latestBonusPayin) {
 
-            // 🧮 Ensure no negative balance
-            if ($balance < 0) {
-                $balance = 0;
-            }
+    $bonusAmount =
+        (float) $latestBonusPayin->extra_cash +
+        (float) $latestBonusPayin->bonus;
 
-            $summary->put($d->date_time, [
-                'date_time' => $d->date_time,
-                'credit' => 0,
-                'debit' => (float) $d->total_debit,
-                'balance' => $balance,
-                'description' => 'Withdraw',
-                'round' => $d->debit_count,
+    if ($bonusAmount > 0) {
+        $summary->push([
+            'date_time'   => $latestBonusPayin->created_at, // ✅ latest created_at
+            'credit'      => $bonusAmount,
+            'debit'       => 0,
+            'balance'     => null,
+            'description' => 'Bonus Added | Order: ' . $latestBonusPayin->order_id,
+            'round'       => null,
+        ]);
+    }
+}
+
+
+
+
+
+/* ================= CAMPAIGN COMMISSION (BONUS) ================= */
+
+$campaignCommission = DB::table('commission_logs')
+    ->join('campaigns', 'commission_logs.campaign_id', '=', 'campaigns.id')
+    ->where('campaigns.user_id', $userId)   // user ke campaigns
+    ->select(
+        'commission_logs.amount',
+        'commission_logs.created_at'
+    )
+    ->get();
+
+foreach ($campaignCommission as $c) {
+
+    if ($c->amount > 0) {
+        $summary->push([
+            'date_time'   => $c->created_at,
+            'credit'      => (float) $c->amount,
+            'debit'       => 0,
+            'balance'     => null,
+            'description' => 'Campaign Commission',
+            'round'       => null,
+        ]);
+    }
+}
+
+
+    
+    
+
+    /* ================= WINGO ================= */
+
+    $wingo = DB::table('bets')
+        ->select('games_no', 'trade_amount', 'win_amount', 'created_at', 'updated_at')
+        ->where('userid', $userId)
+        ->get();
+
+    foreach ($wingo as $b) {
+
+        $summary->push([
+            'date_time'   => $b->created_at,
+            'credit'      => 0,
+            'debit'       => (float) $b->trade_amount,
+            'balance'     => null,
+            'description' => 'Wingo Bet Placed',
+            'round'       => $b->games_no,
+        ]);
+
+        if ($b->win_amount > 0) {
+            $summary->push([
+                'date_time'   => $b->updated_at,
+                'credit'      => (float) $b->win_amount,
+                'debit'       => 0,
+                'balance'     => null,
+                'description' => 'Wingo Bet Won',
+                'round'       => $b->games_no,
             ]);
         }
     }
 
-    // 🕒 Sort by date (latest first)
+    /* ================= GAME HISTORY ================= */
+
+    $games = DB::table('game_history')
+        ->select('game_name', 'game_round', 'bet_amount', 'win_amount', 'created_at', 'callback_time')
+        ->where('user_id', $userId)
+        ->get();
+
+    foreach ($games as $g) {
+
+        $summary->push([
+            'date_time'   => $g->created_at,
+            'credit'      => 0,
+            'debit'       => (float) $g->bet_amount,
+            'balance'     => null,
+            'description' => "{$g->game_name} Bet Placed",
+            'round'       => $g->game_round,
+        ]);
+
+        if ($g->win_amount > 0) {
+            $summary->push([
+                'date_time'   => $g->callback_time,
+                'credit'      => (float) $g->win_amount,
+                'debit'       => 0,
+                'balance'     => null,
+                'description' => "{$g->game_name} Win",
+                'round'       => $g->game_round,
+            ]);
+        }
+    }
+
+    /* ======================================================
+       2️⃣ OPENING BALANCE CALCULATION
+    ====================================================== */
+
+    $totalCredit = $summary->sum('credit');
+    $totalDebit  = $summary->sum('debit');
+
+    $currentWallet = DB::table('users')
+        ->where('id', $userId)
+        ->value('wallet') ?? 0;
+
+    $openingBalance = $currentWallet - ($totalCredit - $totalDebit);
+
+    /* ======================================================
+       3️⃣ RUNNING BALANCE
+    ====================================================== */
+
+    $summary = $summary->sortBy('date_time')->values();
+    $runningBalance = $openingBalance;
+
+    $summary = $summary->transform(function ($row) use (&$runningBalance) {
+        $runningBalance =
+            $runningBalance +
+            ($row['credit'] ?? 0) -
+            ($row['debit'] ?? 0);
+
+        $row['balance'] = round($runningBalance, 2);
+        return $row;
+    });
+
+    /* ======================================================
+       4️⃣ SAFE FILTERING
+    ====================================================== */
+
+    $summary = $summary->filter(function ($row) {
+        return !($row['credit'] == 0 && $row['debit'] == 0);
+    });
+
+    $summary = $summary->groupBy(function ($row) {
+        return $row['round'] ?? uniqid();
+    })->flatMap(function ($items) {
+        return $items->take(2);
+    })->values();
+
+    /* ======================================================
+       5️⃣ LATEST FIRST
+    ====================================================== */
+
     $summary = $summary->sortByDesc('date_time')->values();
 
-    // ✅ Final Response
     return response()->json([
-        'status' => 200,
-        'message' => 'Wallet summary fetched successfully',
-        'data' => $summary,
+        'status'  => 200,
+        'message' => 'Account statement fetched successfully',
+        'data'    => $summary,
     ]);
 }
 
@@ -1274,151 +2184,174 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         ], 400);
     }
 
-    // 🟢 1️⃣ WINGO (bets table)
+   // 🟢 1️⃣ WINGO (bets table)
     $bets = DB::table('bets')
-        ->select('id', 'game_id', 'amount', 'trade_amount', 'win_amount', 'games_no', 'win_number', 'status', 'created_at', 'updated_at')
-        ->where('userid', $userId)
-        ->whereIn('game_id', [1, 2, 3, 4])
-        ->get()
-        ->map(function ($bet) {
-            // Game title mapping
-            $gameTitles = [
-                1 => "Wingo 30 sec",
-                2 => "Wingo 1 min",
-                3 => "Wingo 3 min",
-                4 => "Wingo 5 min",
-            ];
-
-            // Virtual multiplier
-            $virtual = DB::table('virtual_games')
-                ->where('number', $bet->amount)
-                ->first();
-
-            $multiplier = $virtual->multiplier ?? 0;
-
-            // 🧮 Profit/Loss calc (negative na ho)
-            $profitLoss = ($bet->win_amount ?? 0) - ($bet->trade_amount ?? 0);
-            if ($profitLoss < 0) {
-                $profitLoss = 0;
-            }
-
-            // ✅ Win/Loss status
-            $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
-
-            return [
-                'bet_id' => $bet->games_no,
-                'title' => $gameTitles[$bet->game_id] ?? 'Wingo Game',
-                'rate' => $multiplier,
-                'stake' => $bet->trade_amount,
-                'profit_loss' => $profitLoss,
-                'win_status' => $winStatus,
-                'result' => $bet->win_number ?? null,
-                'placed_at' => $bet->created_at,
-                'settled_at' => $bet->updated_at,
-            ];
-        });
-
-    // 🟢 2️⃣ AVIATOR (aviator_bet table)
-    $aviator = DB::table('aviator_bet')
-        ->select('id', 'amount', 'multiplier', 'win', 'game_sr_num', 'status', 'datetime', 'updated_at')
-        ->where('uid', $userId)
-        ->get()
-        ->map(function ($bet) {
-            // 🧮 Profit/Loss calc (negative na ho)
-            $profitLoss = ($bet->win ?? 0) - ($bet->amount ?? 0);
-            if ($profitLoss < 0) {
-                $profitLoss = 0;
-            }
-
-            // ✅ Win/Loss status
-            $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
-
-            return [
-                'bet_id' => $bet->game_sr_num,
-                'title' => 'Aviator Bets',
-                'rate' => $bet->multiplier ?? 0,
-                'stake' => $bet->amount,
-                'profit_loss' => $profitLoss,
-                'win_status' => $winStatus,
-                'result' => $bet->multiplier ?? 0,
-                'placed_at' => $bet->datetime,
-                'settled_at' => $bet->updated_at,
-            ];
-        });
-
-    // 🟢 3️⃣ CHICKEN ROAD (chicken_bets table)
-    $chicken = DB::table('chicken_bets')
-        ->select('id', 'user_id', 'amount', 'win_number', 'multiplier', 'status', 'created_at', 'updated_at')
-        ->where('user_id', $userId)
-        ->get()
-        ->map(function ($bet) {
-            // 🧮 Profit/Loss calc (negative na ho)
-            $profitLoss = ($bet->win_number ?? 0) - ($bet->amount ?? 0);
-            if ($profitLoss < 0) {
-                $profitLoss = 0;
-            }
-
-            // ✅ Win/Loss status
-            $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
-
-            return [
-                'bet_id' => $bet->id,
-                'title' => 'Chicken Road',
-                'rate' => $bet->multiplier ?? 0,
-                'stake' => $bet->amount,
-                'profit_loss' => $profitLoss,
-                'win_status' => $winStatus,
-                'result' => $bet->multiplier ?? 0,
-                'placed_at' => $bet->created_at,
-                'settled_at' => $bet->updated_at,
-            ];
-        });
-        
-        
-        $jili = DB::table('game_history')
-    ->select('id', 'game_id', 'game_name', 'game_round', 'bet_amount', 'win_amount', 'wallet_before', 'wallet_after', 'callback_time', 'created_at')
-    ->where('user_id', $userId)
+    ->select('id', 'game_id', 'amount', 'trade_amount', 'win_amount', 'games_no', 'win_number', 'status', 'created_at', 'updated_at')
+    ->where('userid', $userId)
+    ->whereIn('game_id', [1, 2, 3, 4])
     ->get()
     ->map(function ($bet) {
 
-        // 🧮 Profit/Loss = win_amount - bet_amount
-        $profitLoss = ($bet->win_amount ?? 0) - ($bet->bet_amount ?? 0);
+        // Game title mapping
+        $gameTitles = [
+            1 => "Wingo 30 sec",
+            2 => "Wingo 1 min",
+            3 => "Wingo 3 min",
+            4 => "Wingo 5 min",
+        ];
+
+        // Virtual multiplier
+        $virtual = DB::table('virtual_games')
+            ->where('number', $bet->amount)
+            ->first();
+
+        $multiplier = $virtual->multiplier ?? 0;
+
+        // 🧮 Profit/Loss calc
+        $profitLoss = ($bet->win_amount ?? 0) - ($bet->trade_amount ?? 0);
         if ($profitLoss < 0) {
             $profitLoss = 0;
         }
 
-        // 🟢 Win / Loss status
-        $winStatus = $profitLoss > 0 ? "Win" : "Loss";
+        // Win / Loss
+        $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
+
+        return [
+            'bet_id' => $bet->games_no,
+            'title' => $gameTitles[$bet->game_id] ?? 'Wingo Game',
+            'rate' => $multiplier,
+            'stake' => $bet->trade_amount,
+            'profit_loss' => $profitLoss,
+            'win_status' => $winStatus,
+            'result' => $bet->win_number ?? null,
+            'placed_at' => $bet->created_at,
+            'settled_at' => $bet->updated_at,
+        ];
+    })
+    ->sortByDesc('placed_at')   // ⭐ Correct placement
+    ->values();
+
+
+   $aviator = DB::table('aviator_bet')
+    ->select(
+        'id',
+        'amount',
+        'multiplier',
+        'win',
+        'game_sr_num',
+        'status',
+        'datetime',
+        'updated_at'
+    )
+    ->where('uid', $userId)
+    ->get()
+    ->map(function ($bet) {
+
+        $profitLoss = ($bet->win ?? 0) - ($bet->amount ?? 0);
+
+        if ($profitLoss < 0) {
+            $profitLoss = 0;
+        }
+
+        // ✅ FLOAT FIX → 2 decimal only
+        $profitLoss = round($profitLoss, 2);
+
+        $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
+
+        return [
+            'bet_id'      => $bet->game_sr_num,
+            'title'       => 'Aviator Bets',
+            'rate'        => $bet->multiplier ?? 0,
+            'stake'       => round($bet->amount, 2),
+            'profit_loss' => $profitLoss,
+            'win_status'  => $winStatus,
+            'result'      => $bet->multiplier ?? 0,
+            'placed_at'   => $bet->datetime,
+            'settled_at'  => $bet->updated_at,
+        ];
+    })
+    ->sortByDesc('placed_at')
+    ->values();
+
+
+
+    $chicken = DB::table('chicken_bets')
+    ->select('id', 'user_id', 'amount', 'win_number','win_amount', 'multiplier', 'status', 'created_at', 'updated_at')
+    ->where('user_id', $userId)
+    ->get()
+    ->map(function ($bet) {
+
+        $profitLoss = ($bet->win_number ?? 0) - ($bet->amount ?? 0);
+        if ($profitLoss < 0) $profitLoss = 0;
+        //$profitLoss= 'win_amount',
+
+        $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
+
+        return [
+            'bet_id' => $bet->id,
+            'title' => 'Chicken Road',
+            'rate' => $bet->multiplier ?? 0,
+            'stake' => $bet->amount,
+            'profit_loss' => $bet->win_amount,
+
+            'win_status' => $winStatus,
+            'result' => $bet->multiplier ?? 0,
+            'placed_at' => $bet->created_at,
+            'settled_at' => $bet->updated_at,
+        ];
+    })
+    ->sortByDesc('placed_at')
+    ->values();
+;
+        
+        $jili = DB::table('game_history')
+    ->select('id', 'game_id', 'game_name', 'game_round', 'bet_amount', 'win_amount', 'wallet_before', 'wallet_after', 'callback_time', 'created_at', 'updated_at')
+    ->where('user_id', $userId)
+    ->get()
+    ->map(function ($bet) {
+        
+        
+
+        $profitLoss = ($bet->win_amount ?? 0) - ($bet->bet_amount ?? 0);
+        if ($profitLoss < 0) $profitLoss = 0;
+         $profitLoss = round($profitLoss, 2);
+
+        $winStatus = $profitLoss > 0 ? 'Win' : 'Loss';
 
         return [
             'bet_id'       => $bet->game_round ?? $bet->id,
             'title'        => $bet->game_name ?? "JILI Game",
-            'rate'         => 0, // JILI multiplier not provided
+            'rate'         => 0,
             'stake'        => $bet->bet_amount,
             'profit_loss'  => $profitLoss,
             'win_status'   => $winStatus,
             'result'       => $bet->win_amount,
-           // 'wallet_before'=> $bet->wallet_before,
-            //'wallet_after' => $bet->wallet_after,
             'placed_at'    => $bet->created_at,
             'settled_at'   => $bet->callback_time,
         ];
-    });
+    })
+    ->sortByDesc('placed_at')
+    ->values();
 
         
         
+        $mergedBets = $bets
+    ->merge($aviator)
+    ->merge($chicken)
+    ->merge($jili)
+    ->sortByDesc('placed_at')
+    ->values();
 
-    // ✅ Final JSON Response
+        
+
     return response()->json([
-        'status' => 200,
-        'message' => 'Bet history fetched successfully',
-        'data' => [
-            'bets' => $bets,
-            'aviator_bets' => $aviator,
-            'chicken_bets' => $chicken,
-            'jili_bets'     => $jili,   // ⭐ NEW JILI HISTORY
-        ],
-    ]);
+    'status' => 200,
+    'message' => 'Bet history fetched successfully',
+    'data' => [
+        'bets' => $mergedBets
+    ],
+]);
+
 }
 
     public function getPendingBets(Request $request)
@@ -1432,7 +2365,7 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         ], 400);
     }
 
-    // 🧩 Helper function to format & count only status = 0 bets
+    // 🧩 Formatter (sirf format karega, filtering nahi)
     $formatBets = function ($bets, $tableType) {
         $formatted = [];
         $count = 1;
@@ -1445,44 +2378,44 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         };
 
         foreach ($bets as $bet) {
-            // sirf pending (status = 0) bets ka hi count
-            if ($bet->status == 0) {
-                $formatted[] = [
-                    'id' => $bet->id,
-                    'user_id' => $bet->userid ?? $bet->uid ?? $bet->user_id,
-                    'amount' => $bet->amount,
-                    'game_id' => $bet->game_id,
-                    'game_name' => $gameName,
-                    'status' => $bet->status,
-                    'placed_date_time' => date('d-m-Y h:i:s A', strtotime($bet->created_at)),
-                    'bet_sequence' => $count++, // sequence increase only for pending bets
-                ];
-            }
+            $formatted[] = [
+                'id' => $bet->id,
+                'user_id' => $bet->userid ?? $bet->uid ?? $bet->user_id,
+                'amount' => $bet->amount,
+                'game_id' => $bet->game_id,
+                'game_name' => $gameName,
+                'status' => $bet->status,
+                'placed_date_time' => date('d-m-Y h:i:s A', strtotime($bet->created_at)),
+                'bet_sequence' => $count++,
+            ];
         }
 
         return $formatted;
     };
 
-    // 🟢 Fetch pending bets from each table
+    // 🟢 ONLY PENDING BETS (status = 0)
+
     $bets = DB::table('bets')
         ->select('id', 'userid', 'amount', 'game_id', 'status', 'created_at')
         ->where('userid', $userId)
+        ->where('status', 0)
         ->orderBy('created_at', 'asc')
         ->get();
 
     $aviator = DB::table('aviator_bet')
         ->select('id', 'uid', 'amount', 'game_id', 'status', 'created_at')
         ->where('uid', $userId)
+        ->where('status', 0)
         ->orderBy('created_at', 'asc')
         ->get();
 
     $chicken = DB::table('chicken_bets')
         ->select('id', 'user_id', 'amount', 'game_id', 'status', 'created_at')
         ->where('user_id', $userId)
+        ->where('status', 0)
         ->orderBy('created_at', 'asc')
         ->get();
 
-    // ✅ Final response
     return response()->json([
         'status' => 200,
         'message' => 'Pending bets fetched successfully',
@@ -1712,79 +2645,9 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
 						return $uid;
 					}
 				}
-				
-//     public function login(Request $request)
-//     {
-//     // Base validation
-//     $rules = [
-//         'identity'    => 'required|string',
-//         'password'    => 'required|string|min:6',
-//         'country_code' => 'nullable'
-//     ];
-
-//     $validator = Validator::make($request->all(), $rules);
-
-//     // Conditionally require country_code only when identity is purely numeric (mobile login)
-//     $validator->sometimes('country_code', 'required|string', function ($input) {
-//         return ctype_digit((string) $input->identity);
-//     });
-
-//     if ($validator->fails()) {
-//         return response()->json([
-//             'message' => $validator->errors()->first(),
-//             'status'  => '400'
-//         ], 400);
-//     }
-
-//     // Inputs
-//     $identity     = $request->input('identity');
-//     $password     = $request->input('password');
-//     $country_code = $request->input('country_code');
-
-//     // Determine login type
-//     if (ctype_digit($identity)) {
-//         // Mobile login
-//         $user = DB::table('users')
-//             ->where('mobile', $identity)
-//             ->where('country_code', $country_code)
-//             ->where('password', $password) // ⚠️ plain text match
-//             ->first();
-//     } else {
-//         // Username login
-//         $user = DB::table('users')
-//             ->where('username', $identity)
-//             ->where('password', $password)
-//             ->first();
-//     }
-
-//     if ($user) {
-//         // ✅ Step 1: Generate new token via Sanctum
-//         $userModel   = User::find($user->id); 
-//         $login_token = $userModel->createToken('UserApp')->plainTextToken;
-
-//         // ✅ Step 2: Save token into users table
-//         DB::table('users')->where('id', $user->id)->update([
-//             'login_token' => $login_token,
-//             'updated_at'  => now()
-//         ]);
-
-//         return response()->json([
-//             'message'     => 'Login successful',
-//             'status'      => '200',
-//             'id'          => $user->id,
-//             'login_token' => $login_token,
-//             'mobile' => $user->mobile
-//         ], 200);
-//     } else {
-//         return response()->json([
-//             'message' => 'Invalid credentials',
-//             'status'  => '401',
-//         ], 401);
-//     }
-// }
 
     public function login(Request $request)
-{
+    {
     $rules = [
         'identity'     => 'required|string',
         'password'     => 'required|string|min:6',
@@ -1863,87 +2726,18 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
     ], 200);
 }
 
-
-    // public function login(Request $request)
-    // {
-    //     //dd($request);
-    //     $rules = [
-    //         'identity'    => 'required|string',
-    //         'password'    => 'required|string|min:6',
-    //         'country_code' => 'nullable'
-    //     ];
-    
-    //     $validator = Validator::make($request->all(), $rules);
-    
-    //     $validator->sometimes('country_code', 'required|string', function ($input) {
-    //         return ctype_digit((string) $input->identity);
-    //     });
-    
-    //     if ($validator->fails()) {
-    //         return response()->json([
-    //             'message' => $validator->errors()->first(),
-    //             'status'  => '400'
-    //         ], 400);
-    //     }
-    
-    //     $identity     = $request->identity;
-    //     $password     = $request->password;
-    //     $country_code = $request->country_code;
-    
-    //     if (ctype_digit($identity)) {
-    //         $user = DB::table('users')
-    //             ->where('mobile', $identity)
-    //             ->where('country_code', $country_code)
-    //             ->where('password', $password)
-    //             ->first();
-    //     } else {
-    //         $user = DB::table('users')
-    //             ->where('username', $identity)
-    //             ->where('password', $password)
-    //             ->first();
-    //     }
-    
-    //     if ($user) {
-    
-    //         $userModel   = User::find($user->id);
-    //         $login_token = $userModel->createToken('UserApp')->plainTextToken;
-    
-    //         DB::table('users')->where('id', $user->id)->update([
-    //             'login_token' => $login_token,
-    //             'updated_at'  => now()
-    //         ]);
-    
-    //         return response()->json([
-    //             'message'      => 'Login successful',
-    //             'status'       => '200',
-    //             'id'           => $user->id,
-    //             'login_token'  => $login_token,
-    //             'mobile'       => $user->mobile,
-    //             'account_type' => $user->account_type  // <-- DEMO FLAG
-    //         ], 200);
-    
-    //     } else {
-    
-    //         return response()->json([
-    //             'message' => 'Invalid credentials',
-    //             'status'  => '401',
-    //         ], 401);
-    //     }
-    // }
-    
-    
-
     // ✅ Mobile login
-    private function getUserByCredentialsMobile($mobile, $password, $country_code) {
+    private function getUserByCredentialsMobile($mobile, $password, $country_code) 
+    {
         return DB::table('users')
             ->where('mobile', $mobile)
             ->where('country_code', $country_code)
             ->where('password', $password) // plain match
             ->first();
     }
-    
     // ✅ Username login
-    private function getUserByCredentialsUsername($username, $password) {
+    private function getUserByCredentialsUsername($username, $password) 
+    {
         return DB::table('users')
             ->where('username', $username)
             ->where('password', $password) // plain match
@@ -1951,7 +2745,8 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
     }
     
     // ✅ Update login_token
-    private function updateLoginToken($user_id, $login_token) {
+    private function updateLoginToken($user_id, $login_token) 
+    {
         DB::table('users')->where('id', $user_id)->update([
             'login_token' => $login_token
         ]);
@@ -1971,7 +2766,8 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         return $randomString;
 }
 
-    private function getUserByCredentials($identity, $password) {
+    private function getUserByCredentials($identity, $password) 
+    {
     $user = User::where(function ($query) use ($identity) {
                 $query->where('email', $identity)
                       ->orWhere('mobile', $identity);
@@ -1983,197 +2779,210 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
     return $user;
 }
 
+    public function trackClick(Request $request)
+    {
+    $campaignId = $request->input('campaign_id');
+
+    if (!$campaignId) {
+        return response()->json([
+            'status' => false,
+            'message' => 'campaign_id required'
+        ], 400);
+    }
+
+    // Campaign check
+    $campaign = DB::table('campaigns')
+        ->where('unique_code', $campaignId)
+        ->first();
+
+    if (!$campaign) {
+        return response()->json([
+            'status' => false,
+            'message' => 'Invalid campaign'
+        ], 404);
+    }
+
+    // ✅ Increment click count (ATOMIC & SAFE)
+    DB::table('campaigns')
+        ->where('unique_code', $campaignId)
+        ->increment('click_count');
+
+    return response()->json([
+        'status' => true,
+        'message' => 'Click tracked'
+    ]);
+}
+
     public function register(Request $request)
     {
-        try {
-            // Step 1: Validate Input
-            $validator = Validator::make($request->all(), [
-                //'email' => 'required|email|unique:users,email',
-                'username' => 'required|string|unique:users,username',
-                'country_code' => 'required',
-                'mobile' => 'required|numeric|digits:10|unique:users,mobile',
-                'password' => 'required|min:8',
-                'password_confirmation' => 'required|min:8|same:password',
-                // allow referral code if it exists either in users(referral_code) OR campaigns(unique_code)
-                'referral_code' => [
-                    'nullable',
-                    'string',
-                    function ($attribute, $value, $fail) {
-                        if ($value) {
-                            $existsInUsers = DB::table('users')->where('referral_code', $value)->exists();
-                            $existsInCampaigns = DB::table('campaigns')->where('unique_code', $value)->exists();
-                            if (! $existsInUsers && ! $existsInCampaigns) {
-                                $fail('The selected referral code is invalid.');
-                            }
+    try {
+        // Step 1: Validate Input
+        $validator = Validator::make($request->all(), [
+            'username' => 'required|string|unique:users,username',
+            'country_code' => 'required',
+            'mobile' => 'required|numeric|digits:10|unique:users,mobile',
+            'password' => 'required|min:8',
+            'password_confirmation' => 'required|min:8|same:password',
+            'referral_code' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if ($value) {
+                        $existsInUsers = DB::table('users')->where('referral_code', $value)->exists();
+                        $existsInCampaigns = DB::table('campaigns')->where('unique_code', $value)->exists();
+                        if (! $existsInUsers && ! $existsInCampaigns) {
+                            $fail('The selected referral code is invalid.');
                         }
-                    },
-                ],
-            ]);
-    
-            if ($validator->fails()) {
-                return response()->json([
-                    'status'  => 400,
-                    'message' => $validator->errors()->first()
-                ], 200);
-            }
-    
-            // Step 2: Generate Required Data
-            $randomReferralCode = 'ZUP' . strtoupper(Str::random(6));
-            $baseUrl = URL::to('/');
-            $uid = $this->generateRandomUID();
-    
-            // Step 3: Prepare User Data
-            $data = [
-                'username'       => $request->username,
-                'u_id'           => $uid,
-                'mobile'         => $request->mobile,
-                'password'       => $request->password, // ⚠ plain text (not secure)
-                'userimage'      => $baseUrl . "/uploads/profileimage/1.png",
-                ///www/wwwroot/root.winbhai.in/public/uploads/profileimage
-                'status'         => 1,
-                'referral_code'  => $randomReferralCode,
-                'wallet'         => 0,
-                'country_code'   => $request->country_code,
-                'created_at'     => now(),
-                'updated_at'     => now(),
-            ];
-    
-            // Step 4: Add Referrer
-            if ($request->filled('referral_code')) {
-                $refCode = $request->referral_code;
-    
-                // 1) check users table first
-                $referrerUser = DB::table('users')->where('referral_code', $refCode)->first();
-                if ($referrerUser) {
-                    $data['referral_user_id'] = $referrerUser->id;
-                } else {
-                    // 2) if not found in users, check campaigns table (unique_code)
-                    $campaign = DB::table('campaigns')->where('unique_code', $refCode)->first();
-                    if ($campaign) {
-                        // set referral_user_id to the campaign's user_id
-                        $data['referral_user_id'] = $campaign->user_id;
-                    } else {
-                        // fallback (shouldn't normally happen because of validator), keep default
-                        $data['referral_user_id'] = 1;
                     }
-                }
-            } else {
-                $data['referral_user_id'] = 1;
-            }
-    
-            // Step 5: Insert User via DB Facade
-            $userId = DB::table('users')->insertGetId($data);
-    
-            // Step 6: Retrieve User model instance to create token
-            $user = User::find($userId);
-            $token = $user->createToken('UserApp')->plainTextToken;
-            
-            // ✅ Step 7: Save same token in users table login_token column
-            DB::table('users')->where('id', $userId)->update([
-                'login_token' => $token
-            ]);
-    
+                },
+            ],
+        ]);
+
+        if ($validator->fails()) {
             return response()->json([
-                'status'  => 200,
-                'message' => 'Registration successful',
-                'data'    => [
-                    'userId' => $userId,
-                    'token'  => $token
-                ]
+                'status'  => 400,
+                'message' => $validator->errors()->first()
             ], 200);
-    
-        } catch (\Throwable $e) {  // catch everything (Exception + Error)
-            Log::error('Registration Error:', ['error' => $e->getMessage()]);
-    
-            return response()->json([
-                'status'  => 500,
-                'message' => 'Something went wrong, please try again later.',
-                'error'   => $e->getMessage() // ⚠️ Production me ise hata dena better hai
-            ], 500);
+        }
+
+        // Step 2: Generate Required Data
+        $randomReferralCode = 'ZUP' . strtoupper(Str::random(6));
+        $baseUrl = URL::to('/');
+        $uid = $this->generateRandomUID();
+
+        // Step 3: Prepare User Data
+        $data = [
+            'username'       => $request->username,
+            'u_id'           => $uid,
+            'mobile'         => $request->mobile,
+            'password'       => $request->password, // ⚠ plain text
+            'userimage'      => $baseUrl . "/uploads/profileimage/1.png",
+            'status'         => 1,
+            'referral_code'  => $randomReferralCode,
+            'wallet'         => 0,
+            'country_code'   => $request->country_code,
+            'created_at'     => now(),
+            'updated_at'     => now(),
+        ];
+
+        // =================== ONLY UPDATED PART ===================
+        // if ($request->filled('referral_code')) {
+
+        //     $refCode = $request->referral_code;
+
+        //     // 1️⃣ Check USERS referral (normal referral)
+        //     $referrerUser = DB::table('users')
+        //         ->where('referral_code', $refCode)
+        //         ->first();
+
+        //     if ($referrerUser) {
+        //         // normal referral → referral_user_id
+        //         $data['referral_user_id'] = $referrerUser->id;
+
+        //     } else {
+        //         // 2️⃣ Check CAMPAIGN referral
+        //         $campaign = DB::table('campaigns')
+        //             ->where('unique_code', $refCode)
+        //             ->first();
+
+        //         if ($campaign) {
+        //             // ❗ Campaign case → store campaign data
+        //             $data['campaign_id'] = $campaign->id;
+        //             $data['campaign_user_id'] = $campaign->user_id;
+        //         }
+        //     }
+
+        // } else {
+        //     // no referral
+        //     $data['referral_user_id'] = 1;
+        // }
+        // // =================== END UPDATED PART ===================
+
+        // // Step 5: Insert User
+        // $userId = DB::table('users')->insertGetId($data);
+        
+        
+        
+        
+        // =================== ONLY UPDATED PART ===================
+$campaignToIncrement = null;
+
+if ($request->filled('referral_code')) {
+
+    $refCode = $request->referral_code;
+
+    // 1️⃣ USER referral
+    $referrerUser = DB::table('users')
+        ->where('referral_code', $refCode)
+        ->first();
+
+    if ($referrerUser) {
+
+        $data['referral_user_id'] = $referrerUser->id;
+
+    } else {
+
+        // 2️⃣ CAMPAIGN referral
+        $campaign = DB::table('campaigns')
+            ->where('unique_code', $refCode)
+            ->first();
+
+        if ($campaign) {
+            $data['campaign_id']      = $campaign->id;
+            $data['campaign_user_id'] = $campaign->user_id;
+
+            // 🔥 store campaign id for increment (after insert)
+            $campaignToIncrement = $campaign->id;
         }
     }
 
-    // public function register(Request $request)
-    // {
-    //     try {
-    //         // Step 1: Validate Input
-    //         $validator = Validator::make($request->all(), [
-    //             //'email' => 'required|email|unique:users,email',
-    //             'username' => 'required|string|unique:users,username',
-    //             'country_code' => 'required',
-    //             'mobile' => 'required|numeric|digits:10|unique:users,mobile',
-    //             'password' => 'required|min:8',
-    //             'password_confirmation' => 'required|min:8|same:password',
-    //             'referral_code' => 'nullable|string|exists:users,referral_code',
-    //         ]);
-    
-    //         if ($validator->fails()) {
-    //             return response()->json([
-    //                 'status'  => 400,
-    //                 'message' => $validator->errors()->first()
-    //             ], 200);
-    //         }
-    
-    //         // Step 2: Generate Required Data
-    //         $randomReferralCode = 'ZUP' . strtoupper(Str::random(6));
-    //         $baseUrl = URL::to('/');
-    //         $uid = $this->generateRandomUID();
-    
-    //         // Step 3: Prepare User Data
-    //         $data = [
-    //             'username'       => $request->username,
-    //             'u_id'           => $uid,
-    //             'mobile'         => $request->mobile,
-    //             'password'       => $request->password, // ⚠ plain text (not secure)
-    //             'userimage'      => $baseUrl . "/image/download.png",
-    //             'status'         => 1,
-    //             'referral_code'  => $randomReferralCode,
-    //             'wallet'         => 0,
-    //             'country_code'   => $request->country_code,
-    //             'created_at'     => now(),
-    //             'updated_at'     => now(),
-    //         ];
-    
-    //         // Step 4: Add Referrer
-    //         if ($request->filled('referral_code')) {
-    //             $referrer = DB::table('users')->where('referral_code', $request->referral_code)->first();
-    //             $data['referral_user_id'] = $referrer ? $referrer->id : null;
-    //         } else {
-    //             $data['referral_user_id'] = 1;
-    //         }
-    
-    //         // Step 5: Insert User via DB Facade
-    //         $userId = DB::table('users')->insertGetId($data);
-    
-    //         // Step 6: Retrieve User model instance to create token
-    //         $user = User::find($userId);
-    //         $token = $user->createToken('UserApp')->plainTextToken;
-            
-    //         // ✅ Step 7: Save same token in users table login_token column
-    //     DB::table('users')->where('id', $userId)->update([
-    //         'login_token' => $token
-    //     ]);
+} else {
+    $data['referral_user_id'] = 1;
+}
+// =================== END UPDATED PART ===================
 
-    
-    //         return response()->json([
-    //             'status'  => 200,
-    //             'message' => 'Registration successful',
-    //             'data'    => [
-    //                 'userId' => $userId,
-    //                 'token'  => $token
-    //             ]
-    //         ], 200);
-    
-    //     } catch (\Throwable $e) {  // catch everything (Exception + Error)
-    //         Log::error('Registration Error:', ['error' => $e->getMessage()]);
-    
-    //         return response()->json([
-    //             'status'  => 500,
-    //             'message' => 'Something went wrong, please try again later.',
-    //             'error'   => $e->getMessage() // ⚠️ Production me ise hata dena better hai
-    //         ], 500);
-    //     }
-    // }
+
+// Step 5: Insert User
+$userId = DB::table('users')->insertGetId($data);
+
+// ✅ Step 5.1: Increment campaign registration count
+if ($campaignToIncrement) {
+    DB::table('campaigns')
+        ->where('id', $campaignToIncrement)
+        ->increment('registration_count');
+}
+
+        
+        
+
+        // Step 6: Create Token
+        $user = User::find($userId);
+        $token = $user->createToken('UserApp')->plainTextToken;
+
+        // Step 7: Save token
+        DB::table('users')->where('id', $userId)->update([
+            'login_token' => $token
+        ]);
+
+        return response()->json([
+            'status'  => 200,
+            'message' => 'Registration successful',
+            'data'    => [
+                'userId' => $userId,
+                'token'  => $token
+            ]
+        ], 200);
+
+    } catch (\Throwable $e) {
+        Log::error('Registration Error:', ['error' => $e->getMessage()]);
+
+        return response()->json([
+            'status'  => 500,
+            'message' => 'Something went wrong, please try again later.',
+            'error'   => $e->getMessage()
+        ], 500);
+    }
+}
 
     public function Account_view(Request $request)
     {
@@ -2670,9 +3479,8 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         
     }
     
-    
-   public function bonusInfo(Request $request)
-{
+    public function bonusInfo(Request $request)
+    {
     $uid = $request->user_id;
     $couponCode = $request->coupon_code;
 
@@ -2773,8 +3581,6 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         ]
     ]);
 }
-
-
 
     public function feedback(Request $request)
     {
@@ -3136,6 +3942,8 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         $availableToWithdraw = max(0, $totalCommission - $withdrawnCommission);
     }
     
+            
+    
     // bets table
         $betsExposure = DB::table('bets')
             ->where('userid', $uid)
@@ -3163,6 +3971,16 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
 
 
 
+            // ===============================================
+        // CASHABLE AMOUNT (main_wallet - thirdparty_wallet - netExposure)
+        // ===============================================
+        $cashable_amount = $main_wallet - $thirdparty_wallet - $netExposure;
+        
+        // Never allow negative
+        $cashable_amount = max(0, $cashable_amount);
+        
+
+
     // =========================================================
     // END OF COMMISSION CALCULATION
     // =========================================================
@@ -3175,12 +3993,25 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
     $chat_on_whatsapp = DB::table('admin_settings')
         ->where('id', 24)
         ->value('longtext');
+        
+        $affilation_withdraw_min = DB::table('admin_settings')
+        ->where('id', 25)
+        ->value('longtext');
+        
+         $affilation_withdraw_max = DB::table('admin_settings')
+        ->where('id', 26)
+        ->value('longtext');
 
     // Prepare response
     $responseData = [
         'id' => $data->id,
+        'username'=> $data->username,
+        'name'=> $data->name,
         'mobile' => $data->mobile,
         'email' => $data->email,
+        'address' => $data->address,
+        'pincode' => $data->pincode,
+        'city' => $data->city,
         'username' => $data->username,
         'userimage' => $data->userimage,
         'recharge' => $data->recharge,
@@ -3217,6 +4048,10 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         // 'available_commission_to_withdraw' => 1000,
         'whatsapp_deposit_number' => $whatsappDepositNumber,
         'chat_on_whatsapp' => $chat_on_whatsapp,
+      'cashable_amount' => round((float) $cashable_amount, 2),
+        'affilation_withdraw_min' => $affilation_withdraw_min,
+        'affilation_withdraw_max' => $affilation_withdraw_max
+
     ];
 
     return response()->json([
@@ -3225,97 +4060,6 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         'data' => $responseData
     ]);
 }
-
-    // public function profile(Request $request) 
-    // {
-    //     $ldate = new DateTime('now');
-      
-    //     $uid = $request->id;
-    
-    //     if (empty($uid)) {
-    //         return response()->json([
-    //             'status' => 400,
-    //             'message' => 'UID Required'
-    //         ]);
-    //     }
-        
-        
-    
-    //     // Fetch user data with the necessary join and data
-    //     $data = DB::table('users as u')
-    //         ->select('u.*', 'a1.longtext as minimum_withdraw', 'a2.longtext as maximum_withdraw')
-    //         ->leftJoin('admin_settings as a1', function ($join) {
-    //             $join->on('a1.id', '=', DB::raw(15));
-    //         })
-    //         ->leftJoin('admin_settings as a2', function ($join) {
-    //             $join->on('a2.id', '=', DB::raw(16));
-    //         })
-    //         ->where('u.id', $uid)
-    //         ->limit(1)
-    //         ->first();
-    
-    //     if ($data === null) {
-    //         return response()->json([
-    //             'status' => 400,
-    //             'message' => 'No data found'
-    //         ]);
-    //     }
-        
-    //       // ✅ Fetch payment limit (id = 14)
-    //     $paymentLimit = DB::table('payment_limits')->where('id', 14)->first();
-        
-    
-    //     // If the user is not blocked (status is 1)
-    //     $status = $data->status;
-    //     if ($status == 1) {
-    
-    //         // Process the wallets
-    //         $thirdpartywallet = isset($data->third_party_wallet) ? $data->third_party_wallet : 0;
-    //         $main_wallet = isset($data->wallet) ? $data->wallet : 0;
-    //         $total_wallet = $thirdpartywallet + $main_wallet;
-    
-    //         // Create the response data array
-    //         $responseData = [
-    //             'id' => $data->id,
-    //             'mobile' => $data->mobile,
-    //             'email' => $data->email,
-    //             'username' => $data->username,
-    //             'userimage' => $data->userimage,
-    //             'recharge' => $data->recharge,
-    //             'u_id' => $data->u_id,
-    //             'login_token' => $data->login_token,
-    //             'referral_code' => $data->referral_code,
-    //             'wallet' => $main_wallet,
-    //             'third_party_wallet' => $thirdpartywallet,
-    //             'total_wallet' => $total_wallet,
-    //             'winning_amount' => $data->winning_wallet,
-    //             'minimum_withdraw' => $data->minimum_withdraw,
-    //             'maximum_withdraw' => $data->maximum_withdraw,
-    //             'last_login_time' => $ldate->format('Y-m-d H:i:s'),
-    //             'apk_link' => "https://root.winbhai.in/winbhai.apk",
-    // 		    'referral_code_url' => "https://winbhai.in/signup?campaign=" . $data->referral_code,
-    //             'aviator_link' => "https://foundercodetech.com",
-    //             'aviator_event_name' => "gbaviator",
-    //             'wingo_socket_url' => "https://aviatorudaan.com/",
-    //             'wingo_socket_event_name' => "globalbet",
-    //             'status' => "1",
-    //             'type' => "0",
-    //              'withdraw_conversion_rate' => $paymentLimit ? $paymentLimit->amount : null,
-    //         ];
-    
-    //         return response()->json([
-    //             'success' => 200,
-    //             'message' => 'Data found',
-    //             'data' => $responseData
-    //         ]);
-    //     } else {
-    //         // If the user is blocked
-    //         return response()->json([
-    //             'status' => 401,
-    //             'message' => 'User blocked by admin'
-    //         ]);
-    //     }
-    // }
 
     public function Status_list()
     {
@@ -3670,7 +4414,6 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
         ]);
     }
 
-	
     public function contact_us()
     {
         $contact = Setting::where('id', 4)
@@ -3715,51 +4458,118 @@ $revenue = $revenueData ? $revenueData->revenue : 0;
             }
         }
     	
+    // public function update_profile(Request $request)
+    // {
+    //      $validator = Validator::make($request->all(), [
+    //     'id' => 'required'
+    // ]);
+
+    // $validator->stopOnFirstFailure();
+
+    // if ($validator->fails()) {
+    //     $response = [
+    //         'status' => 400,
+    //         'message' => $validator->errors()->first()
+    //     ];
+    //     return response()->json($response, 400);
+    // }
+        
+    //     $id = $request->id;
+        
+    //     $value = User::findOrFail($id);
+    //     $status=$value->status;
+        
+    //     	if($status == 1)
+    //     {
+    //     if (!empty($request->username)) {
+    //         $value->username = $request->username;
+    //     }
+        
+    //     if (!empty($request->userimage) && $request->userimage != "null") {
+    //         $value->userimage = $request->userimage;
+    //     }
+    
+    //     // Save the changes
+    //     $value->save();
+    
+    //     $response = [
+    //         'status' => 200,
+    //         'message' => "Successfully updated"
+    //     ];
+    
+    //     return response()->json($response, 200);
+    //     }else{
+    //          $response['message'] = "User block by admin..!";
+    //                 $response['status'] = "401";
+    //                 return response()->json($response,401);
+    //     }
+    // }
+    
     public function update_profile(Request $request)
     {
-         $validator = Validator::make($request->all(), [
-        'id' => 'required'
-    ]);
-
-    $validator->stopOnFirstFailure();
-
-    if ($validator->fails()) {
-        $response = [
-            'status' => 400,
-            'message' => $validator->errors()->first()
-        ];
-        return response()->json($response, 400);
-    }
-        
-        $id = $request->id;
-        
-        $value = User::findOrFail($id);
-        $status=$value->status;
-        
-        	if($status == 1)
-        {
-        if (!empty($request->username)) {
-            $value->username = $request->username;
-        }
-        
-        if (!empty($request->userimage) && $request->userimage != "null") {
-            $value->userimage = $request->userimage;
+        // STEP 1: Validate ID
+        $validator = Validator::make($request->all(), [
+            'id' => 'required|integer|exists:users,id',
+        ]);
+    
+        $validator->stopOnFirstFailure();
+    
+        if ($validator->fails()) {
+            return response()->json([
+                'status'  => 400,
+                'message' => $validator->errors()->first()
+            ], 400);
         }
     
-        // Save the changes
-        $value->save();
+        // STEP 2: Fetch user
+        $user = User::find($request->id);
     
-        $response = [
-            'status' => 200,
-            'message' => "Successfully updated"
-        ];
-    
-        return response()->json($response, 200);
-        }else{
-             $response['message'] = "User block by admin..!";
-                    $response['status'] = "401";
-                    return response()->json($response,401);
+        // STEP 3: Check status
+        if ($user->status != 1) {
+            return response()->json([
+                'status'  => 401,
+                'message' => 'User blocked by admin!'
+            ], 401);
         }
+    
+        // STEP 4: Update only provided fields
+        $updateData = [];
+    
+        if ($request->filled('name')) {
+            $updateData['name'] = $request->name;
+        }
+    
+        if ($request->filled('email')) {
+            $updateData['email'] = $request->email;
+        }
+    
+        if ($request->filled('city')) {
+            $updateData['city'] = $request->city;
+        }
+    
+        if ($request->filled('address')) {
+            $updateData['address'] = $request->address;
+        }
+    
+        if ($request->filled('pincode')) {
+            $updateData['pincode'] = $request->pincode;
+        }
+    
+        // STEP 5: Nothing to update
+        if (empty($updateData)) {
+            return response()->json([
+                'status'  => 400,
+                'message' => 'No data provided to update'
+            ], 400);
+        }
+    
+        // STEP 6: Update user
+        User::where('id', $request->id)->update($updateData);
+    
+        return response()->json([
+            'status'  => 200,
+            'message' => 'Profile updated successfully'
+        ], 200);
     }
     
     public function main_wallet_transfer(Request $request)
@@ -5366,7 +6176,8 @@ AND `created_at` BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND CURDATE();
         return $finaldatas;
     }
     
-    public function betting_rebate(){
+    public function betting_rebate()
+    {
         
         $currentDate = date('Y-m-d');
     		 
@@ -5396,7 +6207,6 @@ AND `created_at` BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 MONTH) AND CURDATE();
     	   }
     		
     	}		
-    	
     	
     public function betting_rebate_history(Request $request)
     {

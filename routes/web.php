@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Cache;
 use App\Http\Controllers\LoginController;
 use App\Http\Controllers\CategoryController;
 
@@ -29,8 +30,28 @@ use App\Http\Controllers\AllBetHistoryController;
 use App\Http\Controllers\BankDetailController;
 use App\Http\Controllers\NoticeController;
 use App\Http\Controllers\PlinkoBetController;
+use App\Http\Controllers\Api\jiliApiController;
 use App\Http\Controllers\{AviatorAdminController,UpAndDownController,RedBlackController,KinoController,DiceController,SpinController,jhandimundaController, highlowController,jackpotController,hotairballoonController,TitliadminController,teenadminController,miniroulleteadminController,
 						  Lucky12Controller,Lucky16Controller,TripleChanceController,FunTargetController,UsdtDepositController,UsdtWidthdrawController,UsdtController,AndarbaharGameController,DragonAdminController,HeadtailGameController,K3Controller,ChickenController,AuthController,AgentController,AssignRoleController,RoleController,PermissionController,CreateRoleController,PlayerController,Manual_qr_Controller,ManualDepositController,ManualWidthdrawController,ConversionController,AgetController,AdminCouponController,CategoryadminLanguageController,AdminNotificationController};
+						  
+						  
+						  
+						  
+
+Route::get('/play/{token}', function ($token) {
+    $realUrl = Cache::get("GAME_URL_" . $token);
+
+    if (!$realUrl) {
+        return "Session expired or invalid game URL.";
+    }
+
+    return redirect()->to($realUrl);  // 🔥 FIX
+});
+
+
+Route::get('/play/{token}', [jiliApiController::class, 'launchGame']);
+
+
 
 
 Route::get('/admin/notification', [AdminNotificationController::class,'index'])->name('notification_admin');
@@ -107,6 +128,12 @@ Route::post('/admin/send-notification', [AdminNotificationController::class, 'se
     
 
     Route::get('/campaign', [UserController::class, 'campaignList'])->name('campaign.list');
+    Route::post('/campaign/update-revenue', 
+    [UserController::class, 'updateUserCampaignRevenue']
+)->name('campaign.update.revenue');
+
+
+
     
     Route::get('/paymentLimitsList', [UserController::class, 'paymentLimitsList'])->name('payment.limits');
     Route::post('/payment-limits/update', [UserController::class, 'updatePaymentLimit'])->name('payment.limit.update');

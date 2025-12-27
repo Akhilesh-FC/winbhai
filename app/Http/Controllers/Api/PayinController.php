@@ -168,132 +168,6 @@ class PayinController extends Controller
             'message' => 'Manual Payment Request sent successfully. Please wait for admin approval.'
         ]);
     }
-
-    
-//     public function manual_payin(Request $request)
-//     {
-//     $validator = Validator::make($request->all(), [
-//         'user_id' => 'required|exists:users,id',
-//         'cash' => 'required|numeric',
-//         'transaction_id' => 'nullable|integer',
-//         'screenshot' => 'required|string',
-//         'coupon_id' => 'nullable|exists:coupons,id',  // ⭐ new coupon parameter
-//     ]);
-
-//     if ($validator->fails()) {
-//         return response()->json([
-//             'status' => 400,
-//             'message' => $validator->errors()->first()
-//         ]);
-//     }
-
-//     $inr = $request->cash;
-//     $image = $request->screenshot;
-//     $transaction_id = $request->transaction_id;
-//     $coupon_id = $request->coupon_id;
-//     $userid = $request->user_id;
-//     $datetime = now();
-//     $orderid = date('YmdHis') . rand(11111, 99999);
-//     $bonus = 0;
-
-//     if (empty($image) || $image === '0' || $image === 'null' || $image === null || $image === '' || $image === 0) {
-//         return response()->json([
-//             'status' => 400,
-//             'message' => 'Please Select Image'
-//         ]);
-//     }
-
-//     // Clean base64 string
-//     $base64Data = preg_replace('#^data:image/\w+;base64,#i', '', $image);
-//     $imageData = base64_decode($base64Data);
-
-//     if ($imageData === false) {
-//         return response()->json([
-//             'status' => 400,
-//             'message' => 'Invalid base64 image'
-//         ]);
-//     }
-
-//     // Create upload directory if not exists
-//     $uploadDir = public_path('uploads/payinqr');
-//     if (!file_exists($uploadDir)) {
-//         mkdir($uploadDir, 0755, true);
-//     }
-
-//     // Save file
-//     $fileName = 'screenshot_' . time() . '_' . rand(1000, 9999) . '.png';
-//     $filePath = $uploadDir . '/' . $fileName;
-
-//     if (!file_put_contents($filePath, $imageData)) {
-//         return response()->json([
-//             'status' => 400,
-//             'message' => 'Failed to save image'
-//         ]);
-//     }
-
-//     // ✅ Store full absolute URL in DB
-//     $baseUrl = 'https://root.winbhai.in/public/';
-//     $fullUrl = $baseUrl . 'uploads/payinqr/' . $fileName;
-    
-    
-    
-//     //  2️⃣ COUPON LOGIC STARTS HERE  
-//     // ======================================================
-//     if (!empty($coupon_id)) {
-
-//         // Fetch coupon details
-//         $coupon = DB::table('coupons')->where('id', $coupon_id)->where('status', 1)->first();
-
-//         if (!$coupon) {
-//             return response()->json(['status' => 400, 'message' => 'Invalid or expired coupon']);
-//         }
-
-//         // Check if user already used this coupon
-//         $used = DB::table('coupon_history')
-//             ->where('user_id', $userid)
-//             ->where('coupon_id', $coupon_id)
-//             ->exists();
-
-//         if ($used) {
-//             return response()->json([
-//                 'status' => 400,
-//                 'message' => 'You have already used this coupon'
-//             ]);
-//         }
-
-//         // Apply bonus percentage
-//         $bonus = ($inr * $coupon->percentage) / 100;
-
-//         // Insert into coupon history table
-//         DB::table('coupon_history')->insert([
-//             'user_id' => $userid,
-//             'coupon_id' => $coupon_id,
-//             'used_at' => now()
-//         ]);
-//     }
-    
-    
-//     $totalAmount = $inr + $bonus;
-    
-//     DB::table('payins')->insert([
-//         'user_id' => $userid,
-//         'cash' => $totalAmount,
-//         'transaction_id' => $transaction_id,
-//         'extra_cash' => $bonus,   
-//         'type' => '2',
-//         'typeimage' => $fullUrl, // ✅ full URL stored here
-//         'order_id' => $orderid,
-//         'status' => 1,
-//         'created_at' => $datetime,
-//         'updated_at' => $datetime
-//     ]);
-
-//     return response()->json([
-//         'status' => 200,
-//         'message' => 'Manual Payment Request sent successfully. Please wait for admin approval.'
-//     ]);
-// }
-
     
     public function qr_view() 
     {
@@ -315,8 +189,8 @@ class PayinController extends Controller
             }
         }
         
-        public function bappa_venture(Request $request)
-{
+    public function bappa_venture(Request $request)
+    {
     $validator = Validator::make($request->all(), [
         'user_id'   => 'required|exists:users,id',
         'cash'      => 'required|numeric',
@@ -454,6 +328,112 @@ class PayinController extends Controller
         ]);
     }
 }
+
+
+    public function checkPayment(Request $request)
+    {
+    $orderid = $request->input('order_id');
+	
+    if ($orderid == "") {
+        return response()->json(['status' => 400, 'message' => 'Order Id is required']);
+    }
+
+    $curl = curl_init();
+    curl_setopt_array($curl, array(
+        CURLOPT_URL => "https://bappaventures.com/api/payinstatus?order_id=$orderid",
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_CUSTOMREQUEST => 'GET',
+        CURLOPT_HTTPHEADER => array(
+            'Cookie: ci_session=uvkdvmvc3n03msqrd4bfiudbgk658uif'
+        ),
+    ));
+
+    $response = curl_exec($curl);
+    curl_close($curl);
+
+    $decodedValue = json_decode($response, true);
+    $match_orders = DB::table('payins')->where('order_id', $orderid)->where('status', 1)->first();
+		 $uids = $match_orders->user_id;
+    if (isset($decodedValue['status']) && $decodedValue['status'] == "success") {
+
+        $match_order = DB::table('payins')->where('order_id', $orderid)->where('status', 1)->first();
+        if ($match_order) {
+
+            $uid = $match_order->user_id;
+            $cash = $match_order->cash;
+            $orderid = $match_order->order_id;
+            $datetime = now();
+
+            $update_payin = DB::table('payins')
+                ->where('order_id', $orderid)
+                ->where('status', 1)
+                ->where('user_id', $uid)
+                ->update(['status' => 2]);
+
+            if ($update_payin) {
+
+                // user data
+                $user = DB::table('users')->where('id', $uid)->first();
+                $referuserid = $user->referral_user_id;
+                $first_recharge = $user->first_recharge;
+
+                // FIRST RECHARGE BONUS CALCULATION (10%)
+                $bonus = 0;
+                if ($first_recharge == 0) {
+                    $bonus = ($cash * 10) / 100;  // 10% EXTRA BONUS
+                }
+
+                // Insert in extra_first_deposit_bonus_claim only if first recharge
+                if ($first_recharge == 0) {
+                    DB::insert("INSERT INTO extra_first_deposit_bonus_claim 
+                        (`userid`, `extra_fdb_id`, `bonus`, `status`, `created_at`, `updated_at`)
+                        VALUES ('$uid','1','$bonus','0','$datetime','$datetime')");
+                }
+
+                // Update User Wallet
+                DB::update("UPDATE users 
+                    SET 
+                        wallet = wallet + $cash + $bonus,
+                        recharge = recharge + $cash,
+                        total_payin = total_payin + $cash,
+                        no_of_payin = no_of_payin + 1,
+                        deposit_balance = deposit_balance + $cash,
+                        first_recharge = IF(first_recharge = 0, 1, first_recharge),
+                        first_recharge_amount = IF(first_recharge = 0, $cash, first_recharge_amount)
+                    WHERE id = $uid");
+
+                // Update referral user yesterday stats
+                if ($referuserid != 0) {
+                    DB::update("UPDATE users SET 
+                        yesterday_payin = yesterday_payin + $cash,
+                        yesterday_no_of_payin = yesterday_no_of_payin + 1,
+                        yesterday_first_deposit = yesterday_first_deposit + IF($first_recharge = 0, $cash, 0)
+                    WHERE id = $referuserid");
+                }
+
+                return redirect()->away('https://root.winbhai.in/uploads/payment_success.php');
+            } 
+            else {
+                return response()->json(['status' => 400, 'message' => 'Failed to update payment status!']);
+            }
+
+        } else {
+            return response()->json(['status' => 400, 'message' => 'Order id not found or already processed']);
+        }
+
+    } else {
+		 $update_payin = DB::table('payins')
+                ->where('order_id', $orderid)
+                ->where('status', 1)
+                ->where('user_id', $uids)
+                ->update(['status' => 3]);
+
+        return redirect()->away('https://root.winbhai.in/uploads/failed.php');
+		
+    }
+}
+
 
     
 //     public function bappa_venture(Request $request) /// bappaventures
@@ -610,8 +590,6 @@ class PayinController extends Controller
 //             ]); 
 //         }
 //     }
-    
-    
     
 	public function payzaaar(Request $request)
     {

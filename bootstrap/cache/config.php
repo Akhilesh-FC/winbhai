@@ -5,17 +5,13 @@
     'env' => 'local',
     'debug' => true,
     'url' => 'https://root.winbhai.in/',
-    'frontend_url' => 'http://localhost:3000',
     'asset_url' => NULL,
     'timezone' => 'Asia/Kolkata',
     'locale' => 'en',
     'fallback_locale' => 'en',
     'faker_locale' => 'en_US',
-    'cipher' => 'AES-256-CBC',
     'key' => 'base64:2ZBZ6solIH7fCbp/XknM5dJL6Mo6oiUhOT+GabR7LyA=',
-    'previous_keys' => 
-    array (
-    ),
+    'cipher' => 'AES-256-CBC',
     'maintenance' => 
     array (
       'driver' => 'file',
@@ -36,10 +32,10 @@
       11 => 'Illuminate\\Mail\\MailServiceProvider',
       12 => 'Illuminate\\Notifications\\NotificationServiceProvider',
       13 => 'Illuminate\\Pagination\\PaginationServiceProvider',
-      14 => 'Illuminate\\Auth\\Passwords\\PasswordResetServiceProvider',
-      15 => 'Illuminate\\Pipeline\\PipelineServiceProvider',
-      16 => 'Illuminate\\Queue\\QueueServiceProvider',
-      17 => 'Illuminate\\Redis\\RedisServiceProvider',
+      14 => 'Illuminate\\Pipeline\\PipelineServiceProvider',
+      15 => 'Illuminate\\Queue\\QueueServiceProvider',
+      16 => 'Illuminate\\Redis\\RedisServiceProvider',
+      17 => 'Illuminate\\Auth\\Passwords\\PasswordResetServiceProvider',
       18 => 'Illuminate\\Session\\SessionServiceProvider',
       19 => 'Illuminate\\Translation\\TranslationServiceProvider',
       20 => 'Illuminate\\Validation\\ValidationServiceProvider',
@@ -60,7 +56,6 @@
       'Bus' => 'Illuminate\\Support\\Facades\\Bus',
       'Cache' => 'Illuminate\\Support\\Facades\\Cache',
       'Config' => 'Illuminate\\Support\\Facades\\Config',
-      'Context' => 'Illuminate\\Support\\Facades\\Context',
       'Cookie' => 'Illuminate\\Support\\Facades\\Cookie',
       'Crypt' => 'Illuminate\\Support\\Facades\\Crypt',
       'Date' => 'Illuminate\\Support\\Facades\\Date',
@@ -85,7 +80,6 @@
       'Request' => 'Illuminate\\Support\\Facades\\Request',
       'Response' => 'Illuminate\\Support\\Facades\\Response',
       'Route' => 'Illuminate\\Support\\Facades\\Route',
-      'Schedule' => 'Illuminate\\Support\\Facades\\Schedule',
       'Schema' => 'Illuminate\\Support\\Facades\\Schema',
       'Session' => 'Illuminate\\Support\\Facades\\Session',
       'Storage' => 'Illuminate\\Support\\Facades\\Storage',
@@ -141,23 +135,6 @@
     'default' => 'null',
     'connections' => 
     array (
-      'reverb' => 
-      array (
-        'driver' => 'reverb',
-        'key' => NULL,
-        'secret' => NULL,
-        'app_id' => NULL,
-        'options' => 
-        array (
-          'host' => NULL,
-          'port' => 443,
-          'scheme' => 'https',
-          'useTLS' => true,
-        ),
-        'client_options' => 
-        array (
-        ),
-      ),
       'pusher' => 
       array (
         'driver' => 'pusher',
@@ -182,6 +159,11 @@
         'driver' => 'ably',
         'key' => NULL,
       ),
+      'redis' => 
+      array (
+        'driver' => 'redis',
+        'connection' => 'default',
+      ),
       'log' => 
       array (
         'driver' => 'log',
@@ -190,11 +172,6 @@
       array (
         'driver' => 'null',
       ),
-      'redis' => 
-      array (
-        'driver' => 'redis',
-        'connection' => 'default',
-      ),
     ),
   ),
   'cache' => 
@@ -202,6 +179,10 @@
     'default' => 'file',
     'stores' => 
     array (
+      'apc' => 
+      array (
+        'driver' => 'apc',
+      ),
       'array' => 
       array (
         'driver' => 'array',
@@ -261,10 +242,6 @@
       array (
         'driver' => 'octane',
       ),
-      'apc' => 
-      array (
-        'driver' => 'apc',
-      ),
     ),
     'prefix' => '',
   ),
@@ -298,6 +275,13 @@
   ),
   'database' => 
   array (
+    'mysql' => 
+    array (
+      'options' => 
+      array (
+        12 => true,
+      ),
+    ),
     'default' => 'mysql',
     'connections' => 
     array (
@@ -312,26 +296,6 @@
       'mysql' => 
       array (
         'driver' => 'mysql',
-        'url' => NULL,
-        'host' => '127.0.0.1',
-        'port' => '3306',
-        'database' => 'winbhai',
-        'username' => 'winbhai',
-        'password' => 'winbhai',
-        'unix_socket' => '',
-        'charset' => 'utf8mb4',
-        'collation' => 'utf8mb4_unicode_ci',
-        'prefix' => '',
-        'prefix_indexes' => true,
-        'strict' => true,
-        'engine' => NULL,
-        'options' => 
-        array (
-        ),
-      ),
-      'mariadb' => 
-      array (
-        'driver' => 'mariadb',
         'url' => NULL,
         'host' => '127.0.0.1',
         'port' => '3306',
@@ -406,13 +370,6 @@
         'database' => '1',
       ),
     ),
-    'mysql' => 
-    array (
-      'options' => 
-      array (
-        12 => true,
-      ),
-    ),
   ),
   'filesystems' => 
   array (
@@ -466,7 +423,6 @@
       'time' => 4,
       'verify' => true,
     ),
-    'rehash_on_login' => true,
   ),
   'logging' => 
   array (
@@ -591,9 +547,9 @@
       array (
         'transport' => 'postmark',
       ),
-      'resend' => 
+      'mailgun' => 
       array (
-        'transport' => 'resend',
+        'transport' => 'mailgun',
       ),
       'sendmail' => 
       array (
@@ -626,10 +582,6 @@
           0 => 'ses',
           1 => 'postmark',
         ),
-      ),
-      'mailgun' => 
-      array (
-        'transport' => 'mailgun',
       ),
     ),
     'from' => 
@@ -731,6 +683,13 @@
   ),
   'services' => 
   array (
+    'mailgun' => 
+    array (
+      'domain' => NULL,
+      'secret' => NULL,
+      'endpoint' => 'api.mailgun.net',
+      'scheme' => 'https',
+    ),
     'postmark' => 
     array (
       'token' => NULL,
@@ -740,25 +699,6 @@
       'key' => '',
       'secret' => '',
       'region' => 'us-east-1',
-    ),
-    'resend' => 
-    array (
-      'key' => NULL,
-    ),
-    'slack' => 
-    array (
-      'notifications' => 
-      array (
-        'bot_user_oauth_token' => NULL,
-        'channel' => NULL,
-      ),
-    ),
-    'mailgun' => 
-    array (
-      'domain' => NULL,
-      'secret' => NULL,
-      'endpoint' => 'api.mailgun.net',
-      'scheme' => 'https',
     ),
   ),
   'session' => 
@@ -791,6 +731,109 @@
       0 => '/www/wwwroot/root.winbhai.in/resources/views',
     ),
     'compiled' => '/www/wwwroot/root.winbhai.in/storage/framework/views',
+  ),
+  'flare' => 
+  array (
+    'key' => NULL,
+    'flare_middleware' => 
+    array (
+      0 => 'Spatie\\FlareClient\\FlareMiddleware\\RemoveRequestIp',
+      1 => 'Spatie\\FlareClient\\FlareMiddleware\\AddGitInformation',
+      2 => 'Spatie\\LaravelIgnition\\FlareMiddleware\\AddNotifierName',
+      3 => 'Spatie\\LaravelIgnition\\FlareMiddleware\\AddEnvironmentInformation',
+      4 => 'Spatie\\LaravelIgnition\\FlareMiddleware\\AddExceptionInformation',
+      5 => 'Spatie\\LaravelIgnition\\FlareMiddleware\\AddDumps',
+      'Spatie\\LaravelIgnition\\FlareMiddleware\\AddLogs' => 
+      array (
+        'maximum_number_of_collected_logs' => 200,
+      ),
+      'Spatie\\LaravelIgnition\\FlareMiddleware\\AddQueries' => 
+      array (
+        'maximum_number_of_collected_queries' => 200,
+        'report_query_bindings' => true,
+      ),
+      'Spatie\\LaravelIgnition\\FlareMiddleware\\AddJobs' => 
+      array (
+        'max_chained_job_reporting_depth' => 5,
+      ),
+      'Spatie\\FlareClient\\FlareMiddleware\\CensorRequestBodyFields' => 
+      array (
+        'censor_fields' => 
+        array (
+          0 => 'password',
+          1 => 'password_confirmation',
+        ),
+      ),
+      'Spatie\\FlareClient\\FlareMiddleware\\CensorRequestHeaders' => 
+      array (
+        'headers' => 
+        array (
+          0 => 'API-KEY',
+        ),
+      ),
+    ),
+    'send_logs_as_events' => true,
+  ),
+  'ignition' => 
+  array (
+    'editor' => 'phpstorm',
+    'theme' => 'auto',
+    'enable_share_button' => true,
+    'register_commands' => false,
+    'solution_providers' => 
+    array (
+      0 => 'Spatie\\Ignition\\Solutions\\SolutionProviders\\BadMethodCallSolutionProvider',
+      1 => 'Spatie\\Ignition\\Solutions\\SolutionProviders\\MergeConflictSolutionProvider',
+      2 => 'Spatie\\Ignition\\Solutions\\SolutionProviders\\UndefinedPropertySolutionProvider',
+      3 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\IncorrectValetDbCredentialsSolutionProvider',
+      4 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\MissingAppKeySolutionProvider',
+      5 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\DefaultDbNameSolutionProvider',
+      6 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\TableNotFoundSolutionProvider',
+      7 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\MissingImportSolutionProvider',
+      8 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\InvalidRouteActionSolutionProvider',
+      9 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\ViewNotFoundSolutionProvider',
+      10 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\RunningLaravelDuskInProductionProvider',
+      11 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\MissingColumnSolutionProvider',
+      12 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\UnknownValidationSolutionProvider',
+      13 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\MissingMixManifestSolutionProvider',
+      14 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\MissingViteManifestSolutionProvider',
+      15 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\MissingLivewireComponentSolutionProvider',
+      16 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\UndefinedViewVariableSolutionProvider',
+      17 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\GenericLaravelExceptionSolutionProvider',
+      18 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\OpenAiSolutionProvider',
+      19 => 'Spatie\\LaravelIgnition\\Solutions\\SolutionProviders\\SailNetworkSolutionProvider',
+    ),
+    'ignored_solution_providers' => 
+    array (
+    ),
+    'enable_runnable_solutions' => NULL,
+    'remote_sites_path' => '/www/wwwroot/root.winbhai.in',
+    'local_sites_path' => '',
+    'housekeeping_endpoint_prefix' => '_ignition',
+    'settings_file_path' => '',
+    'recorders' => 
+    array (
+      0 => 'Spatie\\LaravelIgnition\\Recorders\\DumpRecorder\\DumpRecorder',
+      1 => 'Spatie\\LaravelIgnition\\Recorders\\JobRecorder\\JobRecorder',
+      2 => 'Spatie\\LaravelIgnition\\Recorders\\LogRecorder\\LogRecorder',
+      3 => 'Spatie\\LaravelIgnition\\Recorders\\QueryRecorder\\QueryRecorder',
+    ),
+    'open_ai_key' => NULL,
+    'with_stack_frame_arguments' => true,
+    'argument_reducers' => 
+    array (
+      0 => 'Spatie\\Backtrace\\Arguments\\Reducers\\BaseTypeArgumentReducer',
+      1 => 'Spatie\\Backtrace\\Arguments\\Reducers\\ArrayArgumentReducer',
+      2 => 'Spatie\\Backtrace\\Arguments\\Reducers\\StdClassArgumentReducer',
+      3 => 'Spatie\\Backtrace\\Arguments\\Reducers\\EnumArgumentReducer',
+      4 => 'Spatie\\Backtrace\\Arguments\\Reducers\\ClosureArgumentReducer',
+      5 => 'Spatie\\Backtrace\\Arguments\\Reducers\\DateTimeArgumentReducer',
+      6 => 'Spatie\\Backtrace\\Arguments\\Reducers\\DateTimeZoneArgumentReducer',
+      7 => 'Spatie\\Backtrace\\Arguments\\Reducers\\SymphonyRequestArgumentReducer',
+      8 => 'Spatie\\LaravelIgnition\\ArgumentReducers\\ModelArgumentReducer',
+      9 => 'Spatie\\LaravelIgnition\\ArgumentReducers\\CollectionArgumentReducer',
+      10 => 'Spatie\\Backtrace\\Arguments\\Reducers\\StringableArgumentReducer',
+    ),
   ),
   'tinker' => 
   array (
